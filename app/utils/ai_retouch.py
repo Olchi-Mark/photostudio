@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 from typing import Union, Tuple
-import os, math, cv2
+import os, math, cv2, threading, atexit
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
@@ -199,6 +199,32 @@ _MODEL_DIR = os.path.join(_THIS_DIR, "models")
 MODEL_FACE = os.path.join(_MODEL_DIR, "face_landmarker.task")
 MODEL_POSE = os.path.join(_MODEL_DIR, "pose_landmarker_full.task")
 
+# ---------------------------------------------------------------------------
+# Mediapipe Tasks singletons (stability: avoid repeated create/destroy)
+# ---------------------------------------------------------------------------
+_TASKS_DISABLE = bool(int(os.environ.get("AI_RETOUCH_DISABLE_TASKS", "0") or 0))
+_FACE_LOCK = threading.Lock()
+_POSE_LOCK = threading.Lock()
+_FACE_LM = None   # type: ignore[var-annotated]
+_POSE_LM = None   # type: ignore[var-annotated]
+
+def _close_tasks_singletons():
+    global _FACE_LM, _POSE_LM
+    try:
+        if _FACE_LM is not None and hasattr(_FACE_LM, "close"):
+            try: _FACE_LM.close()
+            except Exception: pass
+    finally:
+        _FACE_LM = None
+    try:
+        if _POSE_LM is not None and hasattr(_POSE_LM, "close"):
+            try: _POSE_LM.close()
+            except Exception: pass
+    finally:
+        _POSE_LM = None
+
+atexit.register(_close_tasks_singletons)
+
 # -----------------------
 # Spec ranges by ratio
 # -----------------------
@@ -299,22 +325,34 @@ def save_jpg(img: "QImage", path: str, quality: int = 100) -> bool:
 # -----------------------
 def _mp_face_landmarks(rgb):
     """return (lms(list[478]), bbox(x,y,w,h)) in pixels; None if fail"""
+    if _TASKS_DISABLE:
+        return None
     try:
         import mediapipe as mp
         from mediapipe.tasks.python import vision
         from mediapipe.tasks.python.core.base_options import BaseOptions
         H, W = rgb.shape[:2]
-        options = vision.FaceLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=MODEL_FACE),
-            running_mode=vision.RunningMode.IMAGE,
-            num_faces=1,
-            output_face_blendshapes=False,
-            output_facial_transformation_matrixes=False,
-        )
-        with vision.FaceLandmarker.create_from_options(options) as lm:
-            mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            res = lm.detect(mp_img)
-        if not res.face_landmarks:
+        global _FACE_LM
+        if _FACE_LM is None:
+            with _FACE_LOCK:
+                if _FACE_LM is None:
+                    if not os.path.isfile(MODEL_FACE):
+                        return None
+                    opts = vision.FaceLandmarkerOptions(
+                        base_options=BaseOptions(model_asset_path=MODEL_FACE),
+                        running_mode=vision.RunningMode.IMAGE,
+                        num_faces=1,
+                        output_face_blendshapes=False,
+                        output_facial_transformation_matrixes=False,
+                    )
+                    _FACE_LM = vision.FaceLandmarker.create_from_options(opts)
+        if _FACE_LM is None:
+            return None
+        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        # Tasks objects are not documented as thread-safe; guard with lock
+        with _FACE_LOCK:
+            res = _FACE_LM.detect(mp_img)
+        if not res or not res.face_landmarks:
             return None
         lms = res.face_landmarks[0]
         xs = [int(p.x * W) for p in lms]; ys = [int(p.y * H) for p in lms]
@@ -326,20 +364,31 @@ def _mp_face_landmarks(rgb):
 
 def _mp_pose_landmarks(rgb):
     """return list pose landmarks (33) or None"""
+    if _TASKS_DISABLE:
+        return None
     try:
         import mediapipe as mp
         from mediapipe.tasks.python import vision
         from mediapipe.tasks.python.core.base_options import BaseOptions
-        options = vision.PoseLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=MODEL_POSE),
-            running_mode=vision.RunningMode.IMAGE,
-            num_poses=1,
-            min_pose_detection_confidence=0.35,
-            min_pose_presence_confidence=0.35,
-        )
-        with vision.PoseLandmarker.create_from_options(options) as pm:
-            mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            res = pm.detect(mp_img)
+        global _POSE_LM
+        if _POSE_LM is None:
+            with _POSE_LOCK:
+                if _POSE_LM is None:
+                    if not os.path.isfile(MODEL_POSE):
+                        return None
+                    opts = vision.PoseLandmarkerOptions(
+                        base_options=BaseOptions(model_asset_path=MODEL_POSE),
+                        running_mode=vision.RunningMode.IMAGE,
+                        num_poses=1,
+                        min_pose_detection_confidence=0.35,
+                        min_pose_presence_confidence=0.35,
+                    )
+                    _POSE_LM = vision.PoseLandmarker.create_from_options(opts)
+        if _POSE_LM is None:
+            return None
+        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        with _POSE_LOCK:
+            res = _POSE_LM.detect(mp_img)
         return res.pose_landmarks[0] if res and res.pose_landmarks else None
     except Exception:
         return None
