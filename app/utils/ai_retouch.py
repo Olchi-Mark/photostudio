@@ -62,11 +62,43 @@ def _load_profiles_from_file(path: str) -> Dict[str, Dict[str, Tuple[float, floa
     out: Dict[str, Dict[str, Tuple[float, float]]] = {}
     for key in ("3040", "3545"):
         if key in prof:
-            item = prof[key]
-            head_r = _to_range01(item.get("head_pct"))
-            top_r  = _to_range01(item.get("top_pct"))
+            item = prof[key] or {}
+            head_src = item.get("head_pct", item.get("head_pct_range"))
+            top_src  = item.get("top_pct",  item.get("top_pct_range"))
+            if head_src is None or top_src is None:
+                continue
+            head_r = _to_range01(head_src)
+            top_r  = _to_range01(top_src)
             out[key] = {"head_pct_range": head_r, "top_pct_range": top_r}
     return out
+
+def _ratio_key_from_param(ratio: Any) -> str:
+    try:
+        if isinstance(ratio, dict) and 'ratio' in ratio:
+            ratio = ratio['ratio']
+        elif hasattr(ratio, 'ratio'):
+            ratio = getattr(ratio, 'ratio')
+    except Exception:
+        pass
+    if isinstance(ratio, (list, tuple)) and len(ratio) == 2:
+        try:
+            rw, rh = int(ratio[0]), int(ratio[1])
+            if (rw, rh) == (3, 4):
+                return '3040'
+            if (rw, rh) == (7, 9):
+                return '3545'
+            aspect = (rw / float(rh)) if rh else 0.0
+            return '3040' if abs(aspect - 0.75) < abs(aspect - 7/9) else '3545'
+        except Exception:
+            return '3545'
+    s = str(ratio).strip().lower()
+    if s in ('3040', '3545'):
+        return s
+    if '3x4' in s or '30x40' in s or '3*4' in s:
+        return '3040'
+    if '7x9' in s or '35x45' in s or '7*9' in s or '3.5x4.5' in s:
+        return '3545'
+    return '3545'
 
 def get_profile_spec(ratio: Any) -> Dict[str, float]:
     """
@@ -74,7 +106,7 @@ def get_profile_spec(ratio: Any) -> Dict[str, float]:
     반환:
       head_pct_min, head_pct_max, top_pct_min, top_pct_max, head_target, top_target
     """
-    key = str(ratio)
+    key = _ratio_key_from_param(ratio)
     profiles = DEFAULT_PROFILES.copy()
     try:
         if os.path.isfile(SETTINGS_PATH):
@@ -1001,6 +1033,69 @@ def process_fixed_paths(*, ratio_default: str = "3545",
                 import shutil
                 shutil.copy2(in_path, out_path)
                 print("[retouch] fallback copy (exception)")
+                return True
+        except Exception:
+            pass
+        return False
+
+
+def process_fixed_paths_session(ratio_code: Optional[str] = None,
+                                *,
+                                face_align_mode: str = "local",
+                                shoulder_strength: float = 1.0,
+                                eye_balance: bool = False) -> bool:
+    """Process fixed I/O with explicit session ratio string.
+    - Input:  C:\\PhotoBox\\origin_photo.jpg (or settings.paths.origin)
+    - Output: C:\\PhotoBox\\ai_origin_photo.jpg (or settings.paths.ai_out)
+    - Ratio:  ratio_code in {"3040","3545"}; default to "3545" if missing/invalid.
+    Safe fallback: on any failure, copy input to output if possible.
+    """
+    in_path, out_path = _resolve_fixed_paths()
+    ratio_key = str(ratio_code).strip() if ratio_code else "3545"
+    if ratio_key not in ("3040", "3545"):
+        ratio_key = "3545"
+    try:
+        print(f"[retouch] fixed(session) start: {in_path} -> {out_path} ratio={ratio_key}")
+        qi = _to_qimage(in_path)
+        if qi is None:
+            print("[retouch] load fail (fixed/session)")
+            if os.path.isfile(in_path):
+                try:
+                    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+                    import shutil
+                    shutil.copy2(in_path, out_path)
+                    print("[retouch] fallback copy (fixed/session)")
+                    return True
+                except Exception:
+                    pass
+            return False
+        q = RetouchPipeline().apply(
+            qi,
+            ratio=ratio_key,
+            face_align_mode=face_align_mode,
+            shoulder_strength=shoulder_strength,
+            eye_balance=eye_balance,
+        )
+        ok = save_jpg(q, out_path, 100)
+        if not ok and os.path.isfile(in_path):
+            try:
+                os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+                import shutil
+                shutil.copy2(in_path, out_path)
+                print("[retouch] fallback copy (save fail, fixed/session)")
+                return True
+            except Exception:
+                pass
+        print(f"[retouch] fixed(session) done ok={ok}")
+        return bool(ok)
+    except Exception as e:
+        print(f"[retouch] fixed(session) error: {e}")
+        try:
+            if os.path.isfile(in_path):
+                os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+                import shutil
+                shutil.copy2(in_path, out_path)
+                print("[retouch] fallback copy (exception, fixed/session)")
                 return True
         except Exception:
             pass
