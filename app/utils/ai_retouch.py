@@ -97,6 +97,40 @@ def get_profile_spec(ratio: Any) -> Dict[str, float]:
         "top_pct_min": top_min,   "top_pct_max": top_max,
         "head_target": head_target, "top_target": top_target,
     }
+
+# -----------------------
+# Fixed I/O via settings.json
+# -----------------------
+def _json_load(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _resolve_fixed_paths() -> Tuple[str, str]:
+    """Return (origin_path, ai_out_path) based on settings; fallback to defaults.
+    Defaults:
+      C:\\PhotoBox\\origin_photo.jpg -> C:\\PhotoBox\\ai_origin_photo.jpg
+    """
+    s = _json_load(SETTINGS_PATH)
+    paths = s.get("paths", {}) if isinstance(s, dict) else {}
+    origin = paths.get("origin", r"C:\\PhotoBox\\origin_photo.jpg")
+    ai_out = paths.get("ai_out", r"C:\\PhotoBox\\ai_origin_photo.jpg")
+    return origin, ai_out
+
+def _select_ratio_from_settings(default: str = "3545") -> Union[str, Tuple[int, int]]:
+    """Pick ratio key from settings.overlay.preset or fallback to default.
+    Returns "3040" or "3545". If ambiguous, return default.
+    """
+    s = _json_load(SETTINGS_PATH)
+    preset = ((s.get("overlay") or {}).get("preset") or "") if isinstance(s, dict) else ""
+    p = str(preset).lower()
+    if "35x45" in p or "3545" in p or "7x9" in p:
+        return "3545"
+    if "30x40" in p or "3040" in p or "3x4" in p:
+        return "3040"
+    return default
 def _collect_debug_points(rgb):
     """얼굴 478포인트(가능시) + 포즈 주요포인트 일부(코, 귀, 어깨) 픽셀 좌표 수집"""
     H, W = rgb.shape[:2]
@@ -908,4 +942,66 @@ def process_file(
         return bool(ok)
     except Exception as e:
         print(f"[retouch] error: {e}")
+        return False
+
+
+def process_fixed_paths(*, ratio_default: str = "3545",
+                        face_align_mode: str = "local",
+                        shoulder_strength: float = 1.0,
+                        eye_balance: bool = False) -> bool:
+    """Process using fixed input/output from settings.json.
+    - Input:  paths.origin (fallback C:\\PhotoBox\\origin_photo.jpg)
+    - Output: paths.ai_out (fallback C:\\PhotoBox\\ai_origin_photo.jpg)
+    - Ratio:  overlay.preset heuristic → "3040"|"3545"; fallback ratio_default
+    Safe fallback: on failure, copies input to output when possible.
+    """
+    in_path, out_path = _resolve_fixed_paths()
+    ratio = _select_ratio_from_settings(ratio_default)
+    try:
+        print(f"[retouch] fixed start: {in_path} -> {out_path} ratio={ratio}")
+        qi = _to_qimage(in_path)
+        if qi is None:
+            print("[retouch] load fail (fixed)")
+            # still attempt fallback copy if input exists
+            if os.path.isfile(in_path):
+                try:
+                    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+                    import shutil
+                    shutil.copy2(in_path, out_path)
+                    print("[retouch] fallback copy (fixed)")
+                    return True
+                except Exception:
+                    pass
+            return False
+        q = RetouchPipeline().apply(
+            qi,
+            ratio=ratio,
+            face_align_mode=face_align_mode,
+            shoulder_strength=shoulder_strength,
+            eye_balance=eye_balance,
+        )
+        ok = save_jpg(q, out_path, 100)
+        if not ok and os.path.isfile(in_path):
+            try:
+                os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+                import shutil
+                shutil.copy2(in_path, out_path)
+                print("[retouch] fallback copy (save fail)")
+                return True
+            except Exception:
+                pass
+        print(f"[retouch] fixed done ok={ok}")
+        return bool(ok)
+    except Exception as e:
+        print(f"[retouch] fixed error: {e}")
+        # fallback copy on error
+        try:
+            if os.path.isfile(in_path):
+                os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+                import shutil
+                shutil.copy2(in_path, out_path)
+                print("[retouch] fallback copy (exception)")
+                return True
+        except Exception:
+            pass
         return False
