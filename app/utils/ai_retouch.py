@@ -25,7 +25,51 @@ DOT_R_CROWN: int = 7             # crown/chin 강조 점 크기
 from typing import Dict, Tuple, Any
 import json, os
 
-SETTINGS_PATH = r"C:\PhotoBox\settings.json"
+def _resolve_settings_path() -> str:
+    """Return the most appropriate settings.json path.
+
+    Priority order:
+      1) PHOTOBOX_SETTINGS_PATH env var (first existing path wins if multiple
+         paths are provided via os.pathsep).
+      2) Repository-local settings.json (project root).
+      3) Legacy Windows install location (C:\\PhotoBox\\settings.json).
+    """
+
+    # Collect candidates while preserving the defined priority.
+    candidates = []
+
+    env_path = os.environ.get("PHOTOBOX_SETTINGS_PATH", "").strip()
+    if env_path:
+        # Allow multiple paths separated by os.pathsep (e.g. "A;B" on Windows).
+        for item in env_path.split(os.pathsep):
+            item = item.strip()
+            if item:
+                candidates.append(item)
+
+    # Project-root settings.json (useful for tests/dev environment).
+    try:
+        here = os.path.abspath(__file__)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(here)))
+        repo_settings = os.path.join(project_root, "settings.json")
+        candidates.append(repo_settings)
+    except Exception:
+        pass
+
+    # Legacy fallback that existing deployments rely on.
+    candidates.append(r"C:\\PhotoBox\\settings.json")
+
+    for path in candidates:
+        try:
+            if path and os.path.isfile(path):
+                return path
+        except Exception:
+            continue
+
+    # Last resort: legacy path (even if missing) to keep previous behaviour.
+    return r"C:\\PhotoBox\\settings.json"
+
+
+SETTINGS_PATH = _resolve_settings_path()
 
 DEFAULT_PROFILES: Dict[str, Dict[str, Tuple[float, float]]] = {
     # 가이드 디폴트(단위: 비율 0~1)
@@ -980,7 +1024,7 @@ def process_file(
     eye_balance: bool = False,
 ) -> bool:
     try:
-        print(f"[retouch] start: { -> n_path} → {out_path}")
+        print(f"[retouch] start: {in_path} → {out_path}")
         qi = _to_qimage(in_path)
         if qi is None:
             print("[retouch] load fail")
@@ -1013,7 +1057,7 @@ def process_fixed_paths(*, ratio_default: str = "3545",
     in_path, out_path = _resolve_fixed_paths()
     ratio = _select_ratio_from_settings(ratio_default)
     try:
-        print(f"[retouch] fixed start: { -> n_path} -> {out_path} ratio={ratio}")
+        print(f"[retouch] fixed start: {in_path} -> {out_path} ratio={ratio}")
         qi = _to_qimage(in_path)
         if qi is None:
             print("[retouch] load fail (fixed)")
@@ -1078,7 +1122,7 @@ def process_fixed_paths_session(ratio_code: Optional[str] = None,
     if ratio_key not in ("3040", "3545"):
         ratio_key = "3545"
     try:
-        print(f"[retouch] fixed(session) start: { -> n_path} -> {out_path} ratio={ratio_key}")
+        print(f"[retouch] fixed(session) start: {in_path} -> {out_path} ratio={ratio_key}")
         qi = _to_qimage(in_path)
         if qi is None:
             print("[retouch] load fail (fixed/session)")
