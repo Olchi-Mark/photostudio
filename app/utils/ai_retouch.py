@@ -769,8 +769,21 @@ class CrownChinEstimator:
             except Exception:
                 pass
 
-        y_crown = int(max(0, min(H-1, int(y_crown if y_crown is not None else 0))))
-        y_chin  = int(max(0, min(H-1, int(y_chin  if y_chin  is not None else int(0.65*H)))))
+        # Finalize with NaN-safe fallback and clamp
+        try:
+            yc = float(y_crown) if y_crown is not None else 0.0
+        except Exception:
+            yc = 0.0
+        try:
+            yn = float(y_chin) if y_chin is not None else (0.65 * H)
+        except Exception:
+            yn = 0.65 * H
+        if not (isinstance(yc, float) and math.isfinite(yc)):
+            yc = 0.0
+        if not (isinstance(yn, float) and math.isfinite(yn)):
+            yn = 0.65 * H
+        y_crown = int(max(0, min(H-1, int(yc))))
+        y_chin  = int(max(0, min(H-1, int(yn))))
         print(f"[crown] y_crown={y_crown} y_chin={y_chin} x_eye_mid={x_eye_mid}")
 
         if return_dbg and Debug_mod:
@@ -923,7 +936,7 @@ class RetouchPipeline:
         self,
         img: QImageLike,
         *,
-        ratio: Tuple[int,int] = (7,9),
+        ratio: Union[Tuple[int,int], str] = (7,9),
         face_align_mode: str = "local",
         shoulder_strength: float = 1.0,
         eye_balance: bool = True,
