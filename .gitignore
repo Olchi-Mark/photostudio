@@ -1,58 +1,35 @@
 ﻿# Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
 .venv/
 venv/
-env/
-*.egg-info/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage*
-htmlcov/
+.env
 
-# Visual Studio / C++
+# VS/Visual Studio
 .vs/
-*.suo
 *.user
-*.VC.db
-*.VC.opendb
-ipch/
-x64/
-x86/
-[Bb]in/
-[Oo]bj/
-[Dd]ebug*/
-[Rr]elease*/
-*.log
-*.tlog
-*.pch
+*.obj
 *.pdb
-*.ilk
-*.iobj
-*.ipdb
+*.idb
+*.tlog
+ipch/
+Debug/
+Release/
+x64/
 
-# Binaries / libs
+# 빌드 산출물
+*.exe
 *.dll
 *.lib
 *.exp
-*.exe
+*.log
 
-# Build dirs
-CMakeFiles/
-CMakeCache.txt
-cmake-build-*/
-build/
-out/
+# 이미지/샘플
+*.jpg
+*.png
+samples/
 
-# Editors / OS
+# IDE
+.idea/
 .vscode/
-.DS_Store
-Thumbs.db
-desktop.ini
 
-# Temp
-*.tmp
-*.bak
