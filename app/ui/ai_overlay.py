@@ -193,6 +193,8 @@ class OverlayCanvas(QWidget):
 
     # --- Paint ---------------------------------------------------------------
     def paintEvent(self, ev) -> None:  # noqa
+        painter = QPainter(self)
+    def paintEvent(self, ev) -> None:  # noqa
         # 부모 크기 동기화 + 구멍 재계산(안전)
         try:
             p = self.parent()
