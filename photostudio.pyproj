@@ -109,6 +109,7 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include=".editorconfig.txt" />
+    <Content Include=".gitignore" />
     <Content Include="app\assets\fonts\S-CoreDream-4Regular.otf" />
     <Content Include="app\assets\fonts\S-CoreDream-5Medium.otf" />
     <Content Include="app\assets\fonts\S-CoreDream-7ExtraBold.otf" />
