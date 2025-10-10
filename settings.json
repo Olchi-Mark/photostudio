@@ -1,0 +1,241 @@
+{
+  "ai": {
+    "enable": true,
+    "gate": {
+      "need_consecutive_ok": 3
+    },
+    "landmarker_model": "app/utils/models/face_landmarker.task",
+    "min_face_score": 0.65,
+    "rows": [
+      {
+        "components": [
+          "정",
+          "2",
+          "3"
+        ],
+        "name": "Raw"
+      },
+      {
+        "components": [
+          "1",
+          "명",
+          "3"
+        ],
+        "name": "Liquify"
+      },
+      {
+        "components": [
+          "1",
+          "2",
+          "3"
+        ],
+        "name": "Neural"
+      },
+      {
+        "components": [
+          "1",
+          "2",
+          "3"
+        ],
+        "name": "Background"
+      }
+    ]
+  },
+  "email": {
+    "auth": {
+      "pass": "cnohsgtpavecnjfw",
+      "user": "wwha0911@gmail.com"
+    },
+    "customer": {
+      "attach": {
+        "hires": false,
+        "lowres": true
+      },
+      "body": "사진을 첨부합니다.",
+      "subject": "증명사진 전송"
+    },
+    "from_address": "noreply@example.com",
+    "from_name": "Photo Studio",
+    "print_manager": {
+      "attach": {
+        "hires": true,
+        "lowres": false
+      },
+      "body": "출력 담당자님, 새로운 촬영본이 도착했습니다.",
+      "subject": "[출력팀] 신규 촬영 사진 - {date}",
+      "to": ""
+    },
+    "retouch_manager": {
+      "attach": {
+        "hires": true,
+        "lowres": true
+      },
+      "body": "보정 담당자님, 새로운 촬영본이 도착했습니다.",
+      "subject": "[보정팀] 보정 작업 요청 - {date}",
+      "to": ""
+    },
+    "smtp": {
+      "host": "smtp.gmail.com",
+      "port": 587,
+      "tls": true
+    }
+  },
+  "flow": {
+    "step_labels": [
+      "정보입력",
+      "사이즈선택",
+      "촬영",
+      "사진선택",
+      "AI 보정",
+      "이메일전송",
+      "추가옵션"
+    ],
+    "steps": [
+      "정보입력",
+      "사이즈선택",
+      "촬영",
+      "사진선택",
+      "AI 보정",
+      "이메일전송",
+      "추가옵션"
+    ]
+  },
+  "input": {
+    "bottom_guide": "",
+    "top_guide": ""
+  },
+  "liveview": {
+    "ms": {
+      "file": 48,
+      "sdk": 33
+    },
+    "stall_ms": 1000
+  },
+  "overlay": {
+    "preset": "passport_35x45",
+    "show_debug": false
+  },
+  "paths": {
+    "ai_out": "C:\\PhotoBox\\ai_origin_photo.jpg",
+    "edited_done": "C:\\PhotoBox\\edited_photo.jpg",
+    "liquify_done": "C:\\PhotoBox\\liquify.jpg",
+    "liveview_dir": "C:\\PhotoBox\\lv",
+    "origin": "C:\\PhotoBox\\origin_photo.jpg",
+    "preset_dir": "C:\\PhotoBox\\setting\\preset",
+    "raw_done": "C:\\PhotoBox\\raw.jpg",
+    "root": "C:\\PhotoBox",
+    "setting_dir": "C:\\PhotoBox\\setting"
+  },
+  "photoshop": {
+    "autorun": false,
+    "background": {
+      "actions": [
+        "grada_blue",
+        "grada_brown",
+        "grada_gray"
+      ],
+      "set": "셀프스튜디오"
+    },
+    "liquify": {
+      "action": "liquify",
+      "set": "셀프스튜디오"
+    },
+    "neural": {
+      "mode1": {
+        "action": "neural",
+        "hotkey": "Ctrl+F6"
+      },
+      "mode2": {
+        "action": "neural_2",
+        "hotkey": "Ctrl+F7"
+      },
+      "progress": {
+        "first_delay_ms": 7000,
+        "period_ms": 1500,
+        "timeout_ms": 60000
+      }
+    },
+    "pipeline_delay_ms": 2000,
+    "ratio": {
+      "action_3040": "3X4",
+      "action_3545": "3.5X4.5",
+      "set": "셀프스튜디오"
+    }
+  },
+  "program_info": {
+    "brand": "MySweetInterview",
+    "changelog": [
+      {
+        "date": "2025-09-01",
+        "notes": [
+          "첫 릴리즈",
+          "환경설정 오버레이 추가",
+          "프린터 기본 설정 반영"
+        ],
+        "version": "1.0.0"
+      }
+    ],
+    "name": "PhotoStudio",
+    "version": "1.0.0"
+  },
+  "retention": {
+    "days": 7
+  },
+  "schema_version": 1,
+  "ui": {
+    "audio": {
+      "ding_volume": 0.4
+    },
+    "borders_fhd": {
+      "bold": 6,
+      "hairline": 1,
+      "normal": 3,
+      "thin": 2
+    },
+    "chrome_fhd": {
+      "footer_h": 96,
+      "gap_bottom": 30,
+      "gap_top": 30,
+      "side_margin": 90,
+      "stepbar_h": 66
+    },
+    "colors": {
+      "bg": "#FFFFFF",
+      "border": "#EDEDED",
+      "card": "#FFFFFF",
+      "danger": "#E55454",
+      "overlay_08": "rgba(0,0,0,0.08)",
+      "overlay_12": "rgba(0,0,0,0.12)",
+      "primary": "#FFA9A9",
+      "primary_active": "#EE9E9E",
+      "primary_hover": "#FFB6B6",
+      "subtext": "#666666",
+      "success": "#2FB573",
+      "surface": "#FFFFFF",
+      "text": "#1A1A1A",
+      "warning": "#F2A100"
+    },
+    "radii_fhd": {
+      "button": 6,
+      "card": 3,
+      "radius": 3
+    },
+    "snap_policy": "floor",
+    "spacing_fhd": {
+      "checkbox": 15,
+      "gap": 12,
+      "pad_h": 12,
+      "pad_v": 12
+    },
+    "typography_fhd": {
+      "body": 15,
+      "h1": 57,
+      "h2": 45,
+      "h3": 36,
+      "h4": 30,
+      "h5": 27,
+      "h6": 21,
+      "label": 18
+    }
+  }
+}

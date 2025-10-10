@@ -1,0 +1,142 @@
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>9b04c588-8ff8-4e73-a47d-b2ba12fbf065</ProjectGuid>
+    <ProjectHome>.</ProjectHome>
+    <StartupFile>main.py</StartupFile>
+    <SearchPath>
+    </SearchPath>
+    <WorkingDirectory>.</WorkingDirectory>
+    <OutputPath>.</OutputPath>
+    <Name>photostudio</Name>
+    <RootNamespace>photostudio</RootNamespace>
+    <InterpreterId>MSBuild|.venv|$(MSBuildProjectFullPath)</InterpreterId>
+    <TestFramework>Pytest</TestFramework>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <DebugSymbols>true</DebugSymbols>
+    <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <DebugSymbols>true</DebugSymbols>
+    <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="app\ai\guidance.py" />
+    <Compile Include="app\components\footer_bar.py" />
+    <Compile Include="app\components\step_bar.py" />
+    <Compile Include="app\components\__init__.py" />
+    <Compile Include="app\config\dev_flags.py" />
+    <Compile Include="app\config\loader.py" />
+    <Compile Include="app\constants.py" />
+    <Compile Include="app\ddd.py" />
+    <Compile Include="app\dpi_lock.py" />
+    <Compile Include="app\fonts.py" />
+    <Compile Include="app\main_window.py" />
+    <Compile Include="app\pages\capture.py" />
+    <Compile Include="app\pages\email_send.py" />
+    <Compile Include="app\pages\enhance_select.py" />
+    <Compile Include="app\pages\intro.py" />
+    <Compile Include="app\pages\input.py" />
+    <Compile Include="app\pages\outro.py" />
+    <Compile Include="app\pages\pick_photo.py" />
+    <Compile Include="app\pages\print_view.py" />
+    <Compile Include="app\pages\setting.py" />
+    <Compile Include="app\pages\size_select.py" />
+    <Compile Include="app\pages\__init__.py" />
+    <Compile Include="app\services\liveview.py" />
+    <Compile Include="app\services\__init__.py" />
+    <Compile Include="app\test_page.py" />
+    <Compile Include="app\themes.py" />
+    <Compile Include="app\ui\ai_overlay.py" />
+    <Compile Include="app\ui\base_page.py" />
+    <Compile Include="app\ui\keyboard_sheet.py" />
+    <Compile Include="app\ui\router.py" />
+    <Compile Include="app\ui\scale.py" />
+    <Compile Include="app\ui\typography.py" />
+    <Compile Include="app\ui\virtual_keyboard.py" />
+    <Compile Include="app\ui\window_mode.py" />
+    <Compile Include="app\utils\ai_retouch.py" />
+    <Compile Include="app\utils\control_camera.py" />
+    <Compile Include="app\utils\control_camera_sdk.py" />
+    <Compile Include="app\utils\emailer.py" />
+    <Compile Include="app\utils\face_engine.py" />
+    <Compile Include="app\utils\image_ops.py" />
+    <Compile Include="app\utils\pose_engine.py" />
+    <Compile Include="app\utils\storage.py" />
+    <Compile Include="app\__init__.py" />
+    <Compile Include="crsdk_connect_dbg.py" />
+    <Compile Include="crsdk_diag.py" />
+    <Compile Include="crsdk_lv_smoke.py" />
+    <Compile Include="lv_capture.py" />
+    <Compile Include="lv_preview.py" />
+    <Compile Include="main.py" />
+    <Compile Include="quick_face_landmarker_tasks.py" />
+    <Compile Include="sdk_probe.py" />
+    <Compile Include="sdk_test.py" />
+    <Compile Include="test_ps_action.py" />
+    <Compile Include="tools\quick_guidance.py" />
+  </ItemGroup>
+  <ItemGroup>
+    <Interpreter Include=".venv\">
+      <Id>.venv</Id>
+      <Version>3.11</Version>
+      <Description>.venv (Python 3.11 (64-bit))</Description>
+      <InterpreterPath>Scripts\python.exe</InterpreterPath>
+      <WindowsInterpreterPath>Scripts\pythonw.exe</WindowsInterpreterPath>
+      <PathEnvironmentVariable>PYTHONPATH</PathEnvironmentVariable>
+      <Architecture>X64</Architecture>
+    </Interpreter>
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="app\" />
+    <Folder Include="app\assets\" />
+    <Folder Include="app\assets\fonts\" />
+    <Folder Include="app\assets\icons\" />
+    <Folder Include="app\assets\sound\" />
+    <Folder Include="app\components\" />
+    <Folder Include="app\config\" />
+    <Folder Include="app\ai\" />
+    <Folder Include="app\services\" />
+    <Folder Include="app\utils\" />
+    <Folder Include="app\styles\" />
+    <Folder Include="app\pages\" />
+    <Folder Include="app\ui\" />
+    <Folder Include="app\utils\models\" />
+    <Folder Include="samples\" />
+    <Folder Include="tools\" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include=".editorconfig.txt" />
+    <Content Include="app\assets\fonts\S-CoreDream-4Regular.otf" />
+    <Content Include="app\assets\fonts\S-CoreDream-5Medium.otf" />
+    <Content Include="app\assets\fonts\S-CoreDream-7ExtraBold.otf" />
+    <Content Include="app\assets\fonts\SIL Open Font License.txt" />
+    <Content Include="app\assets\fonts\Spectral-Bold.ttf" />
+    <Content Include="app\assets\fonts\Spectral-Regular.ttf" />
+    <Content Include="app\assets\fonts\에스코어 드림_라이선스.png" />
+    <Content Include="app\assets\icons\3040.png" />
+    <Content Include="app\assets\icons\3545.png" />
+    <Content Include="app\assets\sound\beep.wav" />
+    <Content Include="app\assets\sound\ding.wav" />
+    <Content Include="app\assets\sound\magic.wav" />
+    <Content Include="app\assets\sound\shutter.wav" />
+    <Content Include="app\config\defaults.json" />
+    <Content Include="app\config\email.json" />
+    <Content Include="app\requirements.txt" />
+    <Content Include="app\styles\app.qss" />
+    <Content Include="app\utils\models\face_landmarker.task" />
+    <Content Include="app\utils\models\pose_landmarker_full.task" />
+    <Content Include="probe_crsdk.cpp" />
+  </ItemGroup>
+  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
+  <!-- Uncomment the CoreCompile target to enable the Build command in
+       Visual Studio and specify your pre- and post-build commands in
+       the BeforeBuild and AfterBuild targets below. -->
+  <!--<Target Name="CoreCompile" />-->
+  <Target Name="BeforeBuild">
+  </Target>
+  <Target Name="AfterBuild">
+  </Target>
+</Project>

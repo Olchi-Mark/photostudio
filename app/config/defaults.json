@@ -1,0 +1,180 @@
+{
+  "schema_version": 1,
+  "program_info": {
+    "name": "PhotoStudio",
+    "brand": "MySweetInterview",
+    "version": "1.0.0",
+    "changelog": [
+      {
+        "version": "1.0.0",
+        "date": "2025-09-01",
+        "notes": [
+          "첫 릴리즈",
+          "환경설정 오버레이 추가",
+          "프린터 기본 설정 반영"
+        ]
+      }
+    ]
+  },
+  "ui": {
+    "snap_policy": "floor",
+    "typography_fhd": {
+      "label": 18,
+      "body": 15,
+      "h6": 21,
+      "h5": 27,
+      "h4": 30,
+      "h3": 36,
+      "h2": 45,
+      "h1": 57
+    },
+    "borders_fhd": {
+      "hairline": 1,
+      "thin": 2,
+      "normal": 3,
+      "bold": 6
+    },
+    "radii_fhd": {
+      "radius": 3,
+      "button": 6,
+      "card": 3
+    },
+    "spacing_fhd": {
+      "pad_v": 12,
+      "pad_h": 12,
+      "gap": 12,
+      "checkbox": 15
+    },
+    "chrome_fhd": {
+      "stepbar_h": 66,
+      "footer_h": 96,
+      "gap_top": 30,
+      "gap_bottom": 30,
+      "side_margin": 90
+    },
+    "colors": {
+      "bg": "#FFFFFF",
+      "surface": "#FFFFFF",
+      "card": "#FFFFFF",
+      "border": "#EDEDED",
+      "text": "#1A1A1A",
+      "subtext": "#666666",
+      "primary": "#FFA9A9",
+      "primary_hover": "#FFB7B7",
+      "primary_active": "#FF9D9D",
+      "success": "#2FB573",
+      "warning": "#F2A100",
+      "danger": "#E55454",
+      "overlay_08": "rgba(0,0,0,0.08)",
+      "overlay_12": "rgba(0,0,0,0.12)"
+    },
+    "audio": {
+      "ding_volume": 0.4
+    }
+  },
+  "flow": {
+    "steps": [
+      "INTRO",
+      "INPUT",
+      "SIZE",
+      "CAPTURE",
+      "PICK",
+      "PREVIEW",
+      "EMAIL",
+      "OUTRO"
+    ]
+  },
+  "paths": {
+    "root": "C:\\PhotoBox",
+    "origin": "C:\\PhotoBox\\origin_photo.jpg",
+    "ai_out": "C:\\PhotoBox\\ai_origin_photo.jpg",
+    "raw_done": "C:\\PhotoBox\\raw.jpg",
+    "liquify_done": "C:\\PhotoBox\\liquify.jpg",
+    "edited_done": "C:\\PhotoBox\\edited_photo.jpg",
+    "setting_dir": "C:\\PhotoBox\\setting",
+    "preset_dir": "C:\\PhotoBox\\setting\\preset",
+    "liveview_dir": "C:\\PhotoBox\\lv"
+  },
+  "retention": {
+    "days": 7
+  },
+  "input": {
+    "top_guide": "",
+    "bottom_guide": ""
+  },
+  "ai": {
+    "rows": [
+      {
+        "name": "Raw",
+        "components": [
+          "프리셋01",
+          "프리셋02",
+          "프리셋03"
+        ]
+      },
+      {
+        "name": "Liquify",
+        "components": [
+          "프리셋04",
+          "프리셋05",
+          "프리셋06"
+        ]
+      },
+      {
+        "name": "Neural",
+        "components": [
+          "프리셋07",
+          "프리셋08",
+          "프리셋09"
+        ]
+      },
+      {
+        "name": "Background",
+        "components": [
+          "프리셋10",
+          "프리셋11",
+          "프리셋12"
+        ]
+      }
+    ]
+  },
+  "email": {
+    "from_name": "Photo Studio",
+    "from_address": "noreply@example.com",
+    "smtp": {
+      "host": "smtp.gmail.com",
+      "port": 587,
+      "tls": true
+    },
+    "auth": {
+      "user": "wwha0911@gmail.com",
+      "pass": "cnohsgtpavecnjfw"
+    },
+    "customer": {
+      "subject": "증명사진 전송",
+      "body": "사진을 첨부합니다.",
+      "attach": {
+        "lowres": true,
+        "hires": false
+      }
+    },
+    "print_manager": {
+      "to": "",
+      "subject": "[출력팀] 신규 촬영 사진 - {date}",
+      "body": "출력 담당자님, 새로운 촬영본이 도착했습니다.",
+      "attach": {
+        "lowres": false,
+        "hires": true
+      }
+    },
+    "retouch_manager": {
+      "to": "",
+      "subject": "[보정팀] 보정 작업 요청 - {date}",
+      "body": "보정 담당자님, 새로운 촬영본이 도착했습니다.",
+      "attach": {
+        "lowres": true,
+        "hires": true
+      }
+    }
+  }
+}

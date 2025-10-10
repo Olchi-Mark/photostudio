@@ -1,0 +1,29 @@
+{
+  "created_at": "2025-08-28T07:16:55",
+  "size_key": "ID_30x40",
+  "ratio": [
+    3,
+    4
+  ],
+  "preset_token": "original",
+  "user_params": {
+    "brightness": 0,
+    "contrast": 0,
+    "warmth": 0,
+    "smooth": 0
+  },
+  "person": {
+    "name": "",
+    "phone": "",
+    "phone_last4": "0000",
+    "email": ""
+  },
+  "files": {
+    "raw": "raw_selected.png",
+    "preview": "preview_small.jpg",
+    "email": "enhanced_email.jpg",
+    "print": "print_ID_30x40_300ppi_071655.jpg"
+  },
+  "dpi": 300,
+  "app_version": "photostudio-1.0"
+}

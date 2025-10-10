@@ -1,0 +1,58 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage*
+htmlcov/
+
+# Visual Studio / C++
+.vs/
+*.suo
+*.user
+*.VC.db
+*.VC.opendb
+ipch/
+x64/
+x86/
+[Bb]in/
+[Oo]bj/
+[Dd]ebug*/
+[Rr]elease*/
+*.log
+*.tlog
+*.pch
+*.pdb
+*.ilk
+*.iobj
+*.ipdb
+
+# Binaries / libs
+*.dll
+*.lib
+*.exp
+*.exe
+
+# Build dirs
+CMakeFiles/
+CMakeCache.txt
+cmake-build-*/
+build/
+out/
+
+# Editors / OS
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temp
+*.tmp
+*.bak

@@ -1,0 +1,27 @@
+﻿{
+  "simulate": false,
+  "from_email": "wwha0911@gmail.com",
+  "from_name": "My Sweet Interview",
+
+  "subject_template": "[증명사진] {name}님 사진 전송 ({size_key})",
+  "body_template": "{name}님,\n\n요청하신 증명사진을 첨부했습니다.\n- 촬영일: {date} {time}\n- 규격: {size_key}\n\n감사합니다.\n{from_name}",
+
+  "smtp": {
+    "host": "smtp.gmail.com",
+    "port": 465,
+    "use_ssl": true,
+    "use_starttls": false,
+    "username": "wwha0911@gmail.com",
+    "password": "<Gmail 앱 비밀번호 그대로>"
+  },
+
+  "admin": {
+    "recipients": [ "owner@example.com" ]
+  },
+
+  "photo_printer": {
+    "name": ""
+  },
+
+  "retention_days": 7
+}
