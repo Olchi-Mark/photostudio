@@ -383,14 +383,11 @@ def save_jpg(img: "QImage", path: str, quality: int = 100) -> bool:
     import os, cv2
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     try:
-        # OpenCV로 저장하면 EXIF 메타(회전)가 제거되어 90° 틀어짐 방지
+        # Save only via OpenCV to strip EXIF rotation
         bgr = _rgb_from_qimage(img)[:, :, ::-1].copy()
         return bool(cv2.imwrite(path, bgr, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]))
     except Exception:
-        try:
-            return img.save(path, "JPG", int(quality))
-        except Exception:
-            return False
+        return False
 
 
 # -----------------------
@@ -621,7 +618,7 @@ class FaceRollAligner:
     def align(self, image: QImageLike, *, mode: str = "local") -> "QImage":
         qi = _to_qimage(image)
         if qi is None:
-            raise ValueError("FaceRollAligner.align: invalid image")
+            return image  # type: ignore[return-value]
         import numpy as np
         q = qi.convertToFormat(getattr(qi, "Format").Format_RGB888)
         rgb = _rgb_from_qimage(q)
@@ -804,7 +801,7 @@ class ShoulderLeveler:
     def level(self, image: QImageLike, *, strength: float = 1.0, max_deg: float = 8.0) -> "QImage":
         qi = _to_qimage(image)
         if qi is None:
-            raise ValueError("ShoulderLeveler.level: invalid image")
+            return image  # type: ignore[return-value]
         import cv2, numpy as np, math
         q = qi.convertToFormat(getattr(qi, "Format").Format_RGB888)
         rgb = _rgb_from_qimage(q)
@@ -861,7 +858,7 @@ class SpecCropper:
     def crop(self, image: QImageLike, *, ratio: Union[Tuple[int,int], str]=(3,4)) -> "QImage":
         qi = _to_qimage(image)
         if qi is None:
-            raise ValueError("SpecCropper.crop: invalid image")
+            return image  # type: ignore[return-value]
         q = qi.convertToFormat(getattr(qi, "Format").Format_RGB888)
         rgb = _rgb_from_qimage(q)
 
@@ -983,7 +980,7 @@ def process_file(
     eye_balance: bool = False,
 ) -> bool:
     try:
-        print(f"[retouch] start: {in_path} → {out_path}")
+        print(f"[retouch] start: { -> n_path} → {out_path}")
         qi = _to_qimage(in_path)
         if qi is None:
             print("[retouch] load fail")
@@ -1016,7 +1013,7 @@ def process_fixed_paths(*, ratio_default: str = "3545",
     in_path, out_path = _resolve_fixed_paths()
     ratio = _select_ratio_from_settings(ratio_default)
     try:
-        print(f"[retouch] fixed start: {in_path} -> {out_path} ratio={ratio}")
+        print(f"[retouch] fixed start: { -> n_path} -> {out_path} ratio={ratio}")
         qi = _to_qimage(in_path)
         if qi is None:
             print("[retouch] load fail (fixed)")
@@ -1081,7 +1078,7 @@ def process_fixed_paths_session(ratio_code: Optional[str] = None,
     if ratio_key not in ("3040", "3545"):
         ratio_key = "3545"
     try:
-        print(f"[retouch] fixed(session) start: {in_path} -> {out_path} ratio={ratio_key}")
+        print(f"[retouch] fixed(session) start: { -> n_path} -> {out_path} ratio={ratio_key}")
         qi = _to_qimage(in_path)
         if qi is None:
             print("[retouch] load fail (fixed/session)")
@@ -1131,3 +1128,6 @@ def process_photobox_session(session_ratio: str = "3545") -> bool:
     in_p  = r"C:\PhotoBox\origin_photo.jpg"
     out_p = r"C:\PhotoBox\ai_origin_photo.jpg"
     return process_file(in_p, out_p, ratio=session_ratio)
+
+
+
