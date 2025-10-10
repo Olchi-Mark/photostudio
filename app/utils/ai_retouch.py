@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 # app/utils/ai_retouch.py — ID/Resume photo AI retouch pipeline (Tasks)
 # Spec: (3,4)=30×40 → Head 52–58%H, Top 6–10%H
 #       (7,9)=35×45 → Head 73–78%H, Top 6–8%H
@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 from typing import Union, Tuple
-import os, math, cv2
+import os, math, cv2, threading, atexit
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
@@ -62,11 +62,43 @@ def _load_profiles_from_file(path: str) -> Dict[str, Dict[str, Tuple[float, floa
     out: Dict[str, Dict[str, Tuple[float, float]]] = {}
     for key in ("3040", "3545"):
         if key in prof:
-            item = prof[key]
-            head_r = _to_range01(item.get("head_pct"))
-            top_r  = _to_range01(item.get("top_pct"))
+            item = prof[key] or {}
+            head_src = item.get("head_pct", item.get("head_pct_range"))
+            top_src  = item.get("top_pct",  item.get("top_pct_range"))
+            if head_src is None or top_src is None:
+                continue
+            head_r = _to_range01(head_src)
+            top_r  = _to_range01(top_src)
             out[key] = {"head_pct_range": head_r, "top_pct_range": top_r}
     return out
+
+def _ratio_key_from_param(ratio: Any) -> str:
+    try:
+        if isinstance(ratio, dict) and 'ratio' in ratio:
+            ratio = ratio['ratio']
+        elif hasattr(ratio, 'ratio'):
+            ratio = getattr(ratio, 'ratio')
+    except Exception:
+        pass
+    if isinstance(ratio, (list, tuple)) and len(ratio) == 2:
+        try:
+            rw, rh = int(ratio[0]), int(ratio[1])
+            if (rw, rh) == (3, 4):
+                return '3040'
+            if (rw, rh) == (7, 9):
+                return '3545'
+            aspect = (rw / float(rh)) if rh else 0.0
+            return '3040' if abs(aspect - 0.75) < abs(aspect - 7/9) else '3545'
+        except Exception:
+            return '3545'
+    s = str(ratio).strip().lower()
+    if s in ('3040', '3545'):
+        return s
+    if '3x4' in s or '30x40' in s or '3*4' in s:
+        return '3040'
+    if '7x9' in s or '35x45' in s or '7*9' in s or '3.5x4.5' in s:
+        return '3545'
+    return '3545'
 
 def get_profile_spec(ratio: Any) -> Dict[str, float]:
     """
@@ -74,7 +106,7 @@ def get_profile_spec(ratio: Any) -> Dict[str, float]:
     반환:
       head_pct_min, head_pct_max, top_pct_min, top_pct_max, head_target, top_target
     """
-    key = str(ratio)
+    key = _ratio_key_from_param(ratio)
     profiles = DEFAULT_PROFILES.copy()
     try:
         if os.path.isfile(SETTINGS_PATH):
@@ -97,6 +129,40 @@ def get_profile_spec(ratio: Any) -> Dict[str, float]:
         "top_pct_min": top_min,   "top_pct_max": top_max,
         "head_target": head_target, "top_target": top_target,
     }
+
+# -----------------------
+# Fixed I/O via settings.json
+# -----------------------
+def _json_load(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _resolve_fixed_paths() -> Tuple[str, str]:
+    """Return (origin_path, ai_out_path) based on settings; fallback to defaults.
+    Defaults:
+      C:\\PhotoBox\\origin_photo.jpg -> C:\\PhotoBox\\ai_origin_photo.jpg
+    """
+    s = _json_load(SETTINGS_PATH)
+    paths = s.get("paths", {}) if isinstance(s, dict) else {}
+    origin = paths.get("origin", r"C:\\PhotoBox\\origin_photo.jpg")
+    ai_out = paths.get("ai_out", r"C:\\PhotoBox\\ai_origin_photo.jpg")
+    return origin, ai_out
+
+def _select_ratio_from_settings(default: str = "3545") -> Union[str, Tuple[int, int]]:
+    """Pick ratio key from settings.overlay.preset or fallback to default.
+    Returns "3040" or "3545". If ambiguous, return default.
+    """
+    s = _json_load(SETTINGS_PATH)
+    preset = ((s.get("overlay") or {}).get("preset") or "") if isinstance(s, dict) else ""
+    p = str(preset).lower()
+    if "35x45" in p or "3545" in p or "7x9" in p:
+        return "3545"
+    if "30x40" in p or "3040" in p or "3x4" in p:
+        return "3040"
+    return default
 def _collect_debug_points(rgb):
     """얼굴 478포인트(가능시) + 포즈 주요포인트 일부(코, 귀, 어깨) 픽셀 좌표 수집"""
     H, W = rgb.shape[:2]
@@ -168,6 +234,13 @@ class _DebugPointsRenderer:
             pass
 
         out = _draw_small_white_points(rgb, pts, radius=DOT_R)
+        # Ensure C-contiguous buffer before OpenCV drawing
+        try:
+            import numpy as np
+            out = out.copy(order="C") if hasattr(out, "copy") else out
+            out = np.ascontiguousarray(out)
+        except Exception:
+            pass
 
         import cv2
         for p in [crown_pt, chin_pt, eye_pt]:
@@ -198,6 +271,32 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _MODEL_DIR = os.path.join(_THIS_DIR, "models")
 MODEL_FACE = os.path.join(_MODEL_DIR, "face_landmarker.task")
 MODEL_POSE = os.path.join(_MODEL_DIR, "pose_landmarker_full.task")
+
+# ---------------------------------------------------------------------------
+# Mediapipe Tasks singletons (stability: avoid repeated create/destroy)
+# ---------------------------------------------------------------------------
+_TASKS_DISABLE = bool(int(os.environ.get("AI_RETOUCH_DISABLE_TASKS", "0") or 0))
+_FACE_LOCK = threading.Lock()
+_POSE_LOCK = threading.Lock()
+_FACE_LM = None   # type: ignore[var-annotated]
+_POSE_LM = None   # type: ignore[var-annotated]
+
+def _close_tasks_singletons():
+    global _FACE_LM, _POSE_LM
+    try:
+        if _FACE_LM is not None and hasattr(_FACE_LM, "close"):
+            try: _FACE_LM.close()
+            except Exception: pass
+    finally:
+        _FACE_LM = None
+    try:
+        if _POSE_LM is not None and hasattr(_POSE_LM, "close"):
+            try: _POSE_LM.close()
+            except Exception: pass
+    finally:
+        _POSE_LM = None
+
+atexit.register(_close_tasks_singletons)
 
 # -----------------------
 # Spec ranges by ratio
@@ -284,14 +383,11 @@ def save_jpg(img: "QImage", path: str, quality: int = 100) -> bool:
     import os, cv2
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     try:
-        # OpenCV로 저장하면 EXIF 메타(회전)가 제거되어 90° 틀어짐 방지
+        # Save only via OpenCV to strip EXIF rotation
         bgr = _rgb_from_qimage(img)[:, :, ::-1].copy()
         return bool(cv2.imwrite(path, bgr, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]))
     except Exception:
-        try:
-            return img.save(path, "JPG", int(quality))
-        except Exception:
-            return False
+        return False
 
 
 # -----------------------
@@ -299,22 +395,34 @@ def save_jpg(img: "QImage", path: str, quality: int = 100) -> bool:
 # -----------------------
 def _mp_face_landmarks(rgb):
     """return (lms(list[478]), bbox(x,y,w,h)) in pixels; None if fail"""
+    if _TASKS_DISABLE:
+        return None
     try:
         import mediapipe as mp
         from mediapipe.tasks.python import vision
         from mediapipe.tasks.python.core.base_options import BaseOptions
         H, W = rgb.shape[:2]
-        options = vision.FaceLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=MODEL_FACE),
-            running_mode=vision.RunningMode.IMAGE,
-            num_faces=1,
-            output_face_blendshapes=False,
-            output_facial_transformation_matrixes=False,
-        )
-        with vision.FaceLandmarker.create_from_options(options) as lm:
-            mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            res = lm.detect(mp_img)
-        if not res.face_landmarks:
+        global _FACE_LM
+        if _FACE_LM is None:
+            with _FACE_LOCK:
+                if _FACE_LM is None:
+                    if not os.path.isfile(MODEL_FACE):
+                        return None
+                    opts = vision.FaceLandmarkerOptions(
+                        base_options=BaseOptions(model_asset_path=MODEL_FACE),
+                        running_mode=vision.RunningMode.IMAGE,
+                        num_faces=1,
+                        output_face_blendshapes=False,
+                        output_facial_transformation_matrixes=False,
+                    )
+                    _FACE_LM = vision.FaceLandmarker.create_from_options(opts)
+        if _FACE_LM is None:
+            return None
+        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        # Tasks objects are not documented as thread-safe; guard with lock
+        with _FACE_LOCK:
+            res = _FACE_LM.detect(mp_img)
+        if not res or not res.face_landmarks:
             return None
         lms = res.face_landmarks[0]
         xs = [int(p.x * W) for p in lms]; ys = [int(p.y * H) for p in lms]
@@ -326,20 +434,31 @@ def _mp_face_landmarks(rgb):
 
 def _mp_pose_landmarks(rgb):
     """return list pose landmarks (33) or None"""
+    if _TASKS_DISABLE:
+        return None
     try:
         import mediapipe as mp
         from mediapipe.tasks.python import vision
         from mediapipe.tasks.python.core.base_options import BaseOptions
-        options = vision.PoseLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=MODEL_POSE),
-            running_mode=vision.RunningMode.IMAGE,
-            num_poses=1,
-            min_pose_detection_confidence=0.35,
-            min_pose_presence_confidence=0.35,
-        )
-        with vision.PoseLandmarker.create_from_options(options) as pm:
-            mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            res = pm.detect(mp_img)
+        global _POSE_LM
+        if _POSE_LM is None:
+            with _POSE_LOCK:
+                if _POSE_LM is None:
+                    if not os.path.isfile(MODEL_POSE):
+                        return None
+                    opts = vision.PoseLandmarkerOptions(
+                        base_options=BaseOptions(model_asset_path=MODEL_POSE),
+                        running_mode=vision.RunningMode.IMAGE,
+                        num_poses=1,
+                        min_pose_detection_confidence=0.35,
+                        min_pose_presence_confidence=0.35,
+                    )
+                    _POSE_LM = vision.PoseLandmarker.create_from_options(opts)
+        if _POSE_LM is None:
+            return None
+        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        with _POSE_LOCK:
+            res = _POSE_LM.detect(mp_img)
         return res.pose_landmarks[0] if res and res.pose_landmarks else None
     except Exception:
         return None
@@ -499,7 +618,7 @@ class FaceRollAligner:
     def align(self, image: QImageLike, *, mode: str = "local") -> "QImage":
         qi = _to_qimage(image)
         if qi is None:
-            raise ValueError("FaceRollAligner.align: invalid image")
+            return image  # type: ignore[return-value]
         import numpy as np
         q = qi.convertToFormat(getattr(qi, "Format").Format_RGB888)
         rgb = _rgb_from_qimage(q)
@@ -654,8 +773,21 @@ class CrownChinEstimator:
             except Exception:
                 pass
 
-        y_crown = int(max(0, min(H-1, int(y_crown if y_crown is not None else 0))))
-        y_chin  = int(max(0, min(H-1, int(y_chin  if y_chin  is not None else int(0.65*H)))))
+        # Finalize with NaN-safe fallback and clamp
+        try:
+            yc = float(y_crown) if y_crown is not None else 0.0
+        except Exception:
+            yc = 0.0
+        try:
+            yn = float(y_chin) if y_chin is not None else (0.65 * H)
+        except Exception:
+            yn = 0.65 * H
+        if not (isinstance(yc, float) and math.isfinite(yc)):
+            yc = 0.0
+        if not (isinstance(yn, float) and math.isfinite(yn)):
+            yn = 0.65 * H
+        y_crown = int(max(0, min(H-1, int(yc))))
+        y_chin  = int(max(0, min(H-1, int(yn))))
         print(f"[crown] y_crown={y_crown} y_chin={y_chin} x_eye_mid={x_eye_mid}")
 
         if return_dbg and Debug_mod:
@@ -669,7 +801,7 @@ class ShoulderLeveler:
     def level(self, image: QImageLike, *, strength: float = 1.0, max_deg: float = 8.0) -> "QImage":
         qi = _to_qimage(image)
         if qi is None:
-            raise ValueError("ShoulderLeveler.level: invalid image")
+            return image  # type: ignore[return-value]
         import cv2, numpy as np, math
         q = qi.convertToFormat(getattr(qi, "Format").Format_RGB888)
         rgb = _rgb_from_qimage(q)
@@ -694,6 +826,12 @@ class ShoulderLeveler:
 
         m_req = -math.tan(math.radians(slope))
         m = float(max(-math.tan(math.radians(max_deg)), min(math.tan(math.radians(max_deg)), m_req*max(0.0, min(1.0, strength)))))
+        # Limit over-correction with a shear cap (safety)
+        SHEAR_CAP = 0.14  # approx tan(8°)
+        if m > SHEAR_CAP:
+            m = SHEAR_CAP
+        elif m < -SHEAR_CAP:
+            m = -SHEAR_CAP
 
         # x' = x + m*(y - y0)  → y0=y_seam을 정확히 사용
         M = np.array([[1.0, m, -m * y_seam], [0.0, 1.0, 0.0]], np.float32)
@@ -720,7 +858,7 @@ class SpecCropper:
     def crop(self, image: QImageLike, *, ratio: Union[Tuple[int,int], str]=(3,4)) -> "QImage":
         qi = _to_qimage(image)
         if qi is None:
-            raise ValueError("SpecCropper.crop: invalid image")
+            return image  # type: ignore[return-value]
         q = qi.convertToFormat(getattr(qi, "Format").Format_RGB888)
         rgb = _rgb_from_qimage(q)
 
@@ -808,7 +946,7 @@ class RetouchPipeline:
         self,
         img: QImageLike,
         *,
-        ratio: Tuple[int,int] = (7,9),
+        ratio: Union[Tuple[int,int], str] = (7,9),
         face_align_mode: str = "local",
         shoulder_strength: float = 1.0,
         eye_balance: bool = True,
@@ -842,7 +980,7 @@ def process_file(
     eye_balance: bool = False,
 ) -> bool:
     try:
-        print(f"[retouch] start: {in_path} → {out_path}")
+        print(f"[retouch] start: { -> n_path} → {out_path}")
         qi = _to_qimage(in_path)
         if qi is None:
             print("[retouch] load fail")
@@ -860,3 +998,136 @@ def process_file(
     except Exception as e:
         print(f"[retouch] error: {e}")
         return False
+
+
+def process_fixed_paths(*, ratio_default: str = "3545",
+                        face_align_mode: str = "local",
+                        shoulder_strength: float = 1.0,
+                        eye_balance: bool = False) -> bool:
+    """Process using fixed input/output from settings.json.
+    - Input:  paths.origin (fallback C:\\PhotoBox\\origin_photo.jpg)
+    - Output: paths.ai_out (fallback C:\\PhotoBox\\ai_origin_photo.jpg)
+    - Ratio:  overlay.preset heuristic → "3040"|"3545"; fallback ratio_default
+    Safe fallback: on failure, copies input to output when possible.
+    """
+    in_path, out_path = _resolve_fixed_paths()
+    ratio = _select_ratio_from_settings(ratio_default)
+    try:
+        print(f"[retouch] fixed start: { -> n_path} -> {out_path} ratio={ratio}")
+        qi = _to_qimage(in_path)
+        if qi is None:
+            print("[retouch] load fail (fixed)")
+            # still attempt fallback copy if input exists
+            if os.path.isfile(in_path):
+                try:
+                    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+                    import shutil
+                    shutil.copy2(in_path, out_path)
+                    print("[retouch] fallback copy (fixed)")
+                    return True
+                except Exception:
+                    pass
+            return False
+        q = RetouchPipeline().apply(
+            qi,
+            ratio=ratio,
+            face_align_mode=face_align_mode,
+            shoulder_strength=shoulder_strength,
+            eye_balance=eye_balance,
+        )
+        ok = save_jpg(q, out_path, 100)
+        if not ok and os.path.isfile(in_path):
+            try:
+                os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+                import shutil
+                shutil.copy2(in_path, out_path)
+                print("[retouch] fallback copy (save fail)")
+                return True
+            except Exception:
+                pass
+        print(f"[retouch] fixed done ok={ok}")
+        return bool(ok)
+    except Exception as e:
+        print(f"[retouch] fixed error: {e}")
+        # fallback copy on error
+        try:
+            if os.path.isfile(in_path):
+                os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+                import shutil
+                shutil.copy2(in_path, out_path)
+                print("[retouch] fallback copy (exception)")
+                return True
+        except Exception:
+            pass
+        return False
+
+
+def process_fixed_paths_session(ratio_code: Optional[str] = None,
+                                *,
+                                face_align_mode: str = "local",
+                                shoulder_strength: float = 1.0,
+                                eye_balance: bool = False) -> bool:
+    """Process fixed I/O with explicit session ratio string.
+    - Input:  C:\\PhotoBox\\origin_photo.jpg (or settings.paths.origin)
+    - Output: C:\\PhotoBox\\ai_origin_photo.jpg (or settings.paths.ai_out)
+    - Ratio:  ratio_code in {"3040","3545"}; default to "3545" if missing/invalid.
+    Safe fallback: on any failure, copy input to output if possible.
+    """
+    in_path, out_path = _resolve_fixed_paths()
+    ratio_key = str(ratio_code).strip() if ratio_code else "3545"
+    if ratio_key not in ("3040", "3545"):
+        ratio_key = "3545"
+    try:
+        print(f"[retouch] fixed(session) start: { -> n_path} -> {out_path} ratio={ratio_key}")
+        qi = _to_qimage(in_path)
+        if qi is None:
+            print("[retouch] load fail (fixed/session)")
+            if os.path.isfile(in_path):
+                try:
+                    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+                    import shutil
+                    shutil.copy2(in_path, out_path)
+                    print("[retouch] fallback copy (fixed/session)")
+                    return True
+                except Exception:
+                    pass
+            return False
+        q = RetouchPipeline().apply(
+            qi,
+            ratio=ratio_key,
+            face_align_mode=face_align_mode,
+            shoulder_strength=shoulder_strength,
+            eye_balance=eye_balance,
+        )
+        ok = save_jpg(q, out_path, 100)
+        if not ok and os.path.isfile(in_path):
+            try:
+                os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+                import shutil
+                shutil.copy2(in_path, out_path)
+                print("[retouch] fallback copy (save fail, fixed/session)")
+                return True
+            except Exception:
+                pass
+        print(f"[retouch] fixed(session) done ok={ok}")
+        return bool(ok)
+    except Exception as e:
+        print(f"[retouch] fixed(session) error: {e}")
+        try:
+            if os.path.isfile(in_path):
+                os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+                import shutil
+                shutil.copy2(in_path, out_path)
+                print("[retouch] fallback copy (exception, fixed/session)")
+                return True
+        except Exception:
+            pass
+        return False
+
+def process_photobox_session(session_ratio: str = "3545") -> bool:
+    in_p  = r"C:\PhotoBox\origin_photo.jpg"
+    out_p = r"C:\PhotoBox\ai_origin_photo.jpg"
+    return process_file(in_p, out_p, ratio=session_ratio)
+
+
+
