@@ -35,6 +35,11 @@ try:
 except Exception:
     pass
 
+# ---- timing constants --------------------------------------------------------
+WARMUP_MS      = 90
+POLL_MS        = 50
+POLL_TOTAL_MS  = 3000
+
 def _log(s: str) -> None: print(f"[LV] {s}")
 
 class _LiveViewThread(QThread):
@@ -71,10 +76,11 @@ class _LiveViewThread(QThread):
                 _d.crsdk_release(); return
             self._h = h
 
+            t_enable = time.time()
             rc_en = _d.crsdk_enable_liveview(self._h, 1)
             _log(f"enable rc={rc_en}")
             # Allow buffers to warm up before pulling info
-            time.sleep(0.10)
+            time.sleep(WARMUP_MS / 1000.0)
             self.statusChanged.emit("sdk")
 
             need = C.c_uint(0)
@@ -82,34 +88,41 @@ class _LiveViewThread(QThread):
             last_kick = 0.0
             gap = self.ms_sdk / 1000.0
 
-            # Phase 1: poll get_lv_info up to 3s
+            # Phase 1: poll get_lv_info up to POLL_TOTAL_MS
             t0 = time.time()
-            while buf is None and not self._stop.is_set() and (time.time() - t0) < 3.0:
+            while buf is None and not self._stop.is_set() and ((time.time() - t0) * 1000.0) < POLL_TOTAL_MS:
                 if _d.crsdk_get_lv_info(self._h, C.byref(need)) == 0:
-                    _log(f"info need={need.value}")
+                    t_ms = int((time.time() - t_enable) * 1000.0)
+                    # width/height are not available at info stage; log 0
+                    _log(f"info t={t_ms} need={need.value} w=0 h=0")
                     if need.value > 0:
                         buf = (C.c_ubyte * int(need.value))()
                         _log(f"lv_info need={need.value}")
                         break
-                time.sleep(0.08)
+                time.sleep(POLL_MS / 1000.0)
 
-            # Phase 2: if still need==0, call lv_smoke() once, then re-poll up to 3s
+            # Phase 2: if still need==0, call lv_smoke() once, then re-poll up to POLL_TOTAL_MS
             if buf is None and not self._stop.is_set():
-                try:
-                    nbytes = C.c_uint(0)
-                    rc_smoke = _d.crsdk_lv_smoke(self._h, None, C.byref(nbytes))
-                    _log(f"smoke rc={rc_smoke}")
-                except Exception:
-                    _log("smoke rc=ERR")
+                # Guard: skip smoke if symbol missing
+                if getattr(_d, "crsdk_lv_smoke", None) is None:
+                    _log("smoke skip (symbol missing)")
+                else:
+                    try:
+                        nbytes = C.c_uint(0)
+                        rc_smoke = _d.crsdk_lv_smoke(self._h, None, C.byref(nbytes))
+                        _log(f"smoke rc={rc_smoke}")
+                    except Exception:
+                        _log("smoke rc=ERR")
                 t1 = time.time()
-                while buf is None and not self._stop.is_set() and (time.time() - t1) < 3.0:
+                while buf is None and not self._stop.is_set() and ((time.time() - t1) * 1000.0) < POLL_TOTAL_MS:
                     if _d.crsdk_get_lv_info(self._h, C.byref(need)) == 0:
-                        _log(f"info need={need.value}")
+                        t_ms = int((time.time() - t_enable) * 1000.0)
+                        _log(f"info t={t_ms} need={need.value} w=0 h=0")
                         if need.value > 0:
                             buf = (C.c_ubyte * int(need.value))()
                             _log(f"lv_info need={need.value}")
                             break
-                    time.sleep(0.08)
+                    time.sleep(POLL_MS / 1000.0)
 
             while not self._stop.is_set():
                 if buf is None:
@@ -145,7 +158,8 @@ class _LiveViewThread(QThread):
                             img = QImage()
                     if not img.isNull():
                         if not hasattr(self, "_started_logged"):
-                            _log("started")
+                            t_started_ms = int((time.time() - t_enable) * 1000.0)
+                            _log(f"started in {t_started_ms}")
                             self._started_logged = True
                         self.frameReady.emit(img)
                 time.sleep(gap)
@@ -171,7 +185,7 @@ class LiveViewService(QObject):
         self.mode = "off"
         self.ms_sdk = 33
         self._stop = threading.Event()
-        self._th: Optional[threading.Thread] = None
+        self._th: Optional[_LiveViewThread] = None
         self._h = C.c_void_p()
         self._cb: Optional[Callable[[QImage], None]] = None
         self._sig_cb_connected = False
