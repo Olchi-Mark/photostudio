@@ -1126,3 +1126,8 @@ def process_fixed_paths_session(ratio_code: Optional[str] = None,
         except Exception:
             pass
         return False
+
+def process_photobox_session(session_ratio: str = "3545") -> bool:
+    in_p  = r"C:\PhotoBox\origin_photo.jpg"
+    out_p = r"C:\PhotoBox\ai_origin_photo.jpg"
+    return process_file(in_p, out_p, ratio=session_ratio)
