@@ -234,6 +234,13 @@ class _DebugPointsRenderer:
             pass
 
         out = _draw_small_white_points(rgb, pts, radius=DOT_R)
+        # Ensure C-contiguous buffer before OpenCV drawing
+        try:
+            import numpy as np
+            out = out.copy(order="C") if hasattr(out, "copy") else out
+            out = np.ascontiguousarray(out)
+        except Exception:
+            pass
 
         import cv2
         for p in [crown_pt, chin_pt, eye_pt]:
@@ -822,6 +829,12 @@ class ShoulderLeveler:
 
         m_req = -math.tan(math.radians(slope))
         m = float(max(-math.tan(math.radians(max_deg)), min(math.tan(math.radians(max_deg)), m_req*max(0.0, min(1.0, strength)))))
+        # Limit over-correction with a shear cap (safety)
+        SHEAR_CAP = 0.14  # approx tan(8°)
+        if m > SHEAR_CAP:
+            m = SHEAR_CAP
+        elif m < -SHEAR_CAP:
+            m = -SHEAR_CAP
 
         # x' = x + m*(y - y0)  → y0=y_seam을 정확히 사용
         M = np.array([[1.0, m, -m * y_seam], [0.0, 1.0, 0.0]], np.float32)
