@@ -71,7 +71,13 @@ try:
     if os.getenv("PV_EXHOOK", "1") == "1":
         _install_global_exhook()
 except Exception:
-    _install_global_exhook()
+# 전역 훅 환경변수 가드: 기본 OFF("0"), "1"이면 설치
+try:
+    if os.getenv("PV_EXHOOK", "0") == "1":
+        _install_global_exhook()
+except Exception:
+    # 설치 실패는 무시
+    pass
 atexit.register(lambda: _state_update(phase="exit"))
 
 #──────── 공통 유틸 ────────
