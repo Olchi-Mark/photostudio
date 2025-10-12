@@ -1,117 +1,106 @@
-﻿"""
-app/ui/ai_overlay.py
+"""
+app/ui/ai_overlay.py — 안정화 버전(페인터 정규화)
+역할: 라이브뷰 위에 가이드/마스크/랜드마크를 그리는 오버레이 위젯
 
-Role: Standalone overlay widget that renders AI guides on top of the live camera preview.
-Status: Overlay + hole-binding complete.
-
-Change Log:
-- 2025-09-18: Converted to independent QWidget (removed BasePage hooks).
-- 2025-09-18: Added hole-binding API and odd-even path masking.
+규칙
+- paintEvent 내부에서는 QPainter 변수 `qp`만 사용한다.
+- paintEvent 중 geometry/show/update 호출 금지(깜빡임·재진입 방지).
+- 보조 그리기 함수는 새 QPainter를 만들지 않고 전달받은 `qp`만 사용한다.
 """
 
+from __future__ import annotations
 
-# stdlib
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any, Iterable
 
-# Qt
-from PySide6.QtCore import Qt, QRectF, QPointF, Slot, QObject, QPoint, Signal
-from PySide6.QtGui import QPainter, QPen, QBrush, QPainterPath
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QApplication, QPushButton, QFileDialog, QFrame
+from PySide6.QtCore import Qt, QRectF, QPointF
+from PySide6.QtGui import QPainter, QPen, QPainterPath, QColor
+from PySide6.QtWidgets import QWidget, QVBoxLayout
 
-# === Overlay Canvas ==========================================================
+
 class OverlayCanvas(QWidget):
-    """Paint-only widget that draws guides on top of camera preview.
-
-    Responsibilities:
-    - Maintain target aspect ratio (e.g., 3:4 or 35:45)
-    - Draw safe-areas and helper lines without owning camera frames
-    - React to runtime token changes (colors, stroke, scale)
-    - Support a fixed "hole" rectangle to leave transparent (preview box exact bounds)
-    """
-
+    """카메라 프리뷰 위에 가이드를 그리는 페인트 전용 위젯."""
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self._ratio: Tuple[int, int] = (3, 4)
         self._hole_rect: Optional[QRectF] = None
-        self._TOK = {
-            "mask_rgba": (0,0,0,128),
+        self._TOK: Dict[str, Any] = {
+            "mask_color": (238, 238, 238, 255),
             "guide_color": (255, 255, 255, 180),
-            "mask_color": (238, 238, 238, 255),  # 90% transparent white
             "stroke": 3,
             "round": 0,
-            "grid_alpha": 120,
-            "scale": 1.0,
-            # landmark tokens
-            "pt_core": (46, 125, 50, 230),      # green
-            "pt_chin": (76, 175, 80, 230),      # light green
-            "pt_eye": (3, 169, 244, 230),       # cyan
-            "pt_nose": (67, 160, 71, 230),      # greenish
-            "pt_shoulder": (255, 215, 64, 230),  # amber for shoulders
-            "pt_pro": (255, 255, 255, 90),      # faint white
-            "pt_radius": 0,
-            # dash options
             "dash_guide": True,
-            "dash_shoulder": True,
-            "dash_chin": True,
-            "dash_color": (204, 204, 204, 255),  # light gray for dashed lines
+            "dash_color": (204, 204, 204, 255),
             "dash_width": 1,
             "show_guide": False,
+            # 랜드마크 색상
+            "pt_core": (46, 125, 50, 230),
+            "pt_chin": (76, 175, 80, 230),
+            "pt_eye": (3, 169, 244, 230),
+            "pt_nose": (67, 160, 71, 230),
+            "pt_shoulder": (255, 215, 64, 230),
+            "pt_pro": (255, 255, 255, 90),
         }
+        self._lm_payload: Optional[Dict[str, Any]] = None
+        self._lm_normalized: bool = False
+        self._dbg_cross: bool = False
+        self._badge_text: str = ""
 
-    # --- Tokens & Debug ------------------------------------------------------
+    # 설정/토큰 ----------------------------------------------------------------
     def refresh_tokens(self, TOK: dict) -> None:
-        """Apply token bag and trigger repaint."""
+        """토큰 값 적용 후 리페인트 요청."""
         self._TOK.update(TOK or {})
         self.update()
 
-    # Debug flag for crosshair
     def set_debug_cross(self, enable: bool) -> None:
+        """디버그 십자선 표시 토글."""
         self._dbg_cross = bool(enable)
         self.update()
 
-    # Back-compat helper for old callers
-    def set_mask_color(self, rgb: Tuple[int, int, int] = (255, 255, 255), alpha: int = 26) -> None:
-        r, g, b = rgb
-        a = int(max(0, min(255, alpha)))
-        self._TOK["mask_color"] = (int(r), int(g), int(b), a)
+    def set_mask_color(self, rgb=(255, 255, 255), alpha: int = 26) -> None:
+        """마스크 색상을 설정한다(QColor 또는 (r,g,b))."""
+        if isinstance(rgb, QColor):
+            c = rgb
+            self._TOK["mask_color"] = (c.red(), c.green(), c.blue(), c.alpha())
+        else:
+            r, g, b = rgb
+            a = int(max(0, min(255, alpha)))
+            self._TOK["mask_color"] = (int(r), int(g), int(b), a)
         self.update()
 
-    # --- Landmarks API -------------------------------------------------------
+    def set_badge(self, text: str) -> None:
+        """오버레이 상단 배지 문구 설정."""
+        self._badge_text = str(text or "")
+        self.update()
+
+    # 랜드마크 -----------------------------------------------------------------
     def clear_landmarks(self) -> None:
+        """랜드마크/정규화 플래그 초기화."""
         self._lm_payload = None
         self._lm_normalized = False
         self.update()
 
     def set_landmarks(self, payload: dict, normalized: bool = False) -> None:
-        """payload keys (optional):
-        - core: {name: (x,y), ...}
-        - chin_ring: [(x,y), ...]
-        - eye_support: {"left": [(x,y)*4], "right": [(x,y)*4]}
-        - nose_support: [(x,y)*2]
-        - pro_mesh: [(x,y), ...]  # many points
-        If `normalized` True, (x,y) are in 0..1 of preview frame.
-        Coordinates are mapped into overlay coords using the current hole rect.
-        """
+        """랜드마크/정규화 플래그 설정."""
         self._lm_payload = payload or None
         self._lm_normalized = bool(normalized)
         self.update()
 
-    # --- Ratio / Hole --------------------------------------------------------
+    # 비율/홀 ------------------------------------------------------------------
     def set_ratio(self, w: int, h: int) -> None:
-        if w <= 0 or h <= 0:
-            return
-        self._ratio = (int(w), int(h))
-        self.update()
+        """가이드 비율을 설정한다."""
+        if w > 0 and h > 0:
+            self._ratio = (int(w), int(h))
+            self.update()
 
     def set_hole_rect(self, rect: Optional[QRectF]) -> None:
+        """프리뷰 영역(hole) 사각형을 설정한다."""
         self._hole_rect = rect
         self.update()
 
-    # --- Utils ---------------------------------------------------------------
-    def _rgba(self, tup: Tuple[int, int, int, int]):
-        from PySide6.QtGui import QColor
+    # 유틸 ---------------------------------------------------------------------
+    def _rgba(self, tup: Tuple[int, int, int, int]) -> QColor:
         r, g, b, a = tup
         return QColor(int(r), int(g), int(b), int(a))
 
@@ -121,100 +110,58 @@ class OverlayCanvas(QWidget):
             return QPointF(hole.left() + x * hole.width(), hole.top() + y * hole.height())
         return QPointF(hole.left() + x, hole.top() + y)
 
-    def _paint_landmarks(self, p: QPainter, hole: QRectF) -> None:
-        norm = getattr(self, "_lm_normalized", False)
-        payload = getattr(self, "_lm_payload", None) or {}
-        r = float(self._TOK.get("pt_radius", 3))
+    def _paint_landmarks(self, qp: QPainter, hole: QRectF) -> None:
+        """랜드마크를 qp로 그린다(새 페인터 생성 금지)."""
+        payload = self._lm_payload or {}
+        normalized = self._lm_normalized
 
-        def draw_pts(pts, color):
+        def draw_pts(pts: Optional[Iterable[Tuple[float, float]]], color_rgba, w: int = 3):
             if not pts:
                 return
-            # tiny-dot mode: diameter 3px (no outline)
-            if r <= 0:
-                qcolor = self._rgba(color)
-                p.setPen(Qt.NoPen)
-                p.setBrush(qcolor)
-                for _pt in pts:
-                    qpt = self._map_pt(_pt, hole, norm)
-                    p.drawEllipse(qpt, 1.5, 1.5)
-                return
-            # outer ring for contrast
-            oc = self._rgba((0, 0, 0, 255))
-            pen_o = QPen(oc); pen_o.setWidth(2)
-            p.setPen(pen_o); p.setBrush(Qt.NoBrush)
-            for _pt in pts:
-                qpt = self._map_pt(_pt, hole, norm)
-                p.drawEllipse(qpt, r+1.5, r+1.5)
-            # inner fill
-            qcolor = self._rgba(color)
-            pen_i = QPen(qcolor); pen_i.setWidth(1)
-            p.setPen(pen_i); p.setBrush(qcolor)
-            for _pt in pts:
-                qpt = self._map_pt(_pt, hole, norm)
-                p.drawEllipse(qpt, r, r)
+            pen = QPen(self._rgba(color_rgba))
+            pen.setWidth(w)
+            qp.setPen(pen)
+            qp.setBrush(Qt.NoBrush)
+            for p in pts:
+                pt = self._map_pt(p, hole, normalized)
+                qp.drawPoint(pt)
 
-        def draw_poly(pts, color, width=2, dashed=False):
-            if not pts or len(pts) < 2:
-                return
-            qpts = [self._map_pt(p, hole, norm) for p in pts]
-            if dashed:
-                color = self._TOK.get("dash_color", (204, 204, 204, 255))
-                width = int(self._TOK.get("dash_width", 1))
-            pen = QPen(self._rgba(color)); pen.setWidth(width)
-            if dashed:
-                pen.setStyle(Qt.DashLine)
-                try:
-                    pen.setDashPattern([6, 4])
-                except Exception:
-                    pass
-            p.setPen(pen); p.setBrush(Qt.NoBrush)
-            from PySide6.QtGui import QPainterPath
-            path = QPainterPath(qpts[0])
-            for q in qpts[1:]:
-                path.lineTo(q)
-            p.drawPath(path)
-
-        # pro mesh first (faint)
-        if bool(self._TOK.get("pro_mode", False)):
-            draw_pts(payload.get("pro_mesh"), self._TOK.get("pt_pro"))
-        # chin ring as points + optional dashed poly
+        if payload.get("pro_mesh"):
+            draw_pts(payload.get("pro_mesh"), self._TOK.get("pt_pro"), 1)
         chin = payload.get("chin_ring")
-        draw_pts(chin, self._TOK.get("pt_chin"))
-        draw_poly(chin, self._TOK.get("pt_chin"), width=1, dashed=bool(self._TOK.get("dash_chin", True)))
+        draw_pts(chin, self._TOK.get("pt_chin"), 2)
         eye = payload.get("eye_support") or {}
-        draw_pts(eye.get("left"), self._TOK.get("pt_eye"))
-        draw_pts(eye.get("right"), self._TOK.get("pt_eye"))
-        draw_pts(payload.get("nose_support"), self._TOK.get("pt_nose"))
+        draw_pts(eye.get("left"), self._TOK.get("pt_eye"), 2)
+        draw_pts(eye.get("right"), self._TOK.get("pt_eye"), 2)
+        draw_pts(payload.get("nose_support"), self._TOK.get("pt_nose"), 2)
         spts = payload.get("shoulder_support")
-        draw_pts(spts, self._TOK.get("pt_shoulder"))
-        draw_poly(spts, self._TOK.get("pt_shoulder"), width=1, dashed=bool(self._TOK.get("dash_shoulder", True)))
+        draw_pts(spts, self._TOK.get("pt_shoulder"), 2)
         core = payload.get("core") or {}
-        draw_pts(core.values() if isinstance(core, dict) else core, self._TOK.get("pt_core"))
+        if isinstance(core, dict):
+            draw_pts(core.values(), self._TOK.get("pt_core"), 3)
+        else:
+            draw_pts(core, self._TOK.get("pt_core"), 3)
 
-    # --- Paint ---------------------------------------------------------------
+    # 페인트 -------------------------------------------------------------------
     def paintEvent(self, ev) -> None:  # noqa
+        """qp 하나만 사용. paint 중 geometry/show/update 호출 금지."""
         qp = QPainter()
         if not qp.begin(self):
             return
         try:
-            qp.setRenderHint(QPainter.Antialiasing, True)
-        except Exception:
-            pass
-    
-        # 부모 크기 동기화 + 구멍 재계산(안전)
-        try:
-            pw = self.parent()
-            # 안정성: paint 중 기하 변경(setGeometry) 금지. 홀만 재계산.
-            # if parent_w is not None:
-            #     self.setGeometry(parent_w.rect())
-            if hasattr(self, "_recalc_hole_from_widget"):
-                self._recalc_hole_from_widget()
-        except Exception:
-            pass
+            try:
+                qp.setRenderHint(QPainter.Antialiasing, True)
+            except Exception:
+                pass
 
-        W, H = self.width(), self.height()
+            # 필요 시 hole만 갱신(geometry 변경은 paint에서 금지)
+            try:
+                if hasattr(self, "_recalc_hole_from_widget"):
+                    self._recalc_hole_from_widget()
+            except Exception:
+                pass
 
-            # 구멍 영역 계산
+            W, H = self.width(), self.height()
             if self._hole_rect is not None:
                 guide_rect = QRectF(self._hole_rect)
             else:
@@ -228,15 +175,14 @@ class OverlayCanvas(QWidget):
                 y = (H - target_h) // 2
                 guide_rect = QRectF(x, y, target_w, target_h)
 
-            # 1) 마스크 채우기(구멍 없으면 전체 채움)
+            # 마스크 채우기(가이드 제외)
             mc = self._TOK.get("mask_color", (238, 238, 238, 255))
             hole = self._hole_rect
             if hole is None or hole.width() <= 0 or hole.height() <= 0:
                 qp.fillRect(0, 0, W, H, self._rgba(mc))
-                # 디버그: 마스크가 안 보일 때 크기 확인
-                # print(f"[OverlayCanvas] mask-only W={W} H={H} mc={mc}")
                 return
-            outer = QPainterPath(); outer.addRect(0, 0, float(W), float(H))
+            outer = QPainterPath()
+            outer.addRect(0, 0, float(W), float(H))
             radius = float(self._TOK.get("round", 0))
             hole_path = QPainterPath()
             if radius > 0:
@@ -247,9 +193,7 @@ class OverlayCanvas(QWidget):
             outer.setFillRule(Qt.OddEvenFill)
             qp.fillPath(outer, self._rgba(mc))
 
-            guide_rect = QRectF(hole)
-
-            # 2) 가이드 프레임 (옵션)
+            # 가이드 사각형(옵션)
             if bool(self._TOK.get("show_guide", False)):
                 gc = self._TOK.get("guide_color", (255, 255, 255, 180))
                 dashed = bool(self._TOK.get("dash_guide", False))
@@ -265,53 +209,39 @@ class OverlayCanvas(QWidget):
                         pass
                 qp.setPen(pen)
                 qp.setBrush(Qt.NoBrush)
-                radius = float(self._TOK.get("round", 0))
                 if radius > 0:
                     qp.drawRoundedRect(guide_rect, radius, radius)
                 else:
                     qp.drawRect(guide_rect)
 
-            # 2.5) debug crosshair if enabled
-            if getattr(self, "_dbg_cross", False):
+            # 디버그 십자선(옵션)
+            if self._dbg_cross:
                 center = guide_rect.center()
                 pen = QPen(self._rgba((255, 0, 0, 255)))
                 pen.setWidth(2)
                 qp.setPen(pen)
-                qp.drawLine(center.x()-24, center.y(), center.x()+24, center.y())
-                qp.drawLine(center.x(), center.y()-24, center.x(), center.y()+24)
+                qp.drawLine(center.x() - 24, center.y(), center.x() + 24, center.y())
+                qp.drawLine(center.x(), center.y() - 24, center.x(), center.y() + 24)
 
-            # 3) 랜드마크 점 렌더
-            payload = getattr(self, "_lm_payload", None)
-            if payload:
+            # 랜드마크
+            if self._lm_payload:
                 self._paint_landmarks(qp, guide_rect)
+
+            # 배지 텍스트
+            if self._badge_text:
+                pen = QPen(QColor(255, 255, 255, 230))
+                pen.setWidth(1)
+                qp.setPen(pen)
+                qp.drawText(guide_rect.adjusted(8, 8, -8, -8), Qt.AlignLeft | Qt.AlignTop, self._badge_text)
         except Exception as ex:
             print("[OV] paint error:", ex)
         finally:
             if qp.isActive():
                 qp.end()
-# === Public Overlay Widget ========================================
-    def _recalc_hole_from_widget(self):
-        try:
-            if getattr(self, "_hole_widget", None):
-                w = self._hole_widget
-                r = w.geometry()
-                tl = w.mapTo(self, r.topLeft())
-                br = w.mapTo(self, r.bottomRight())
-                from PySide6.QtCore import QRect
-                rect = QRect(tl, br)
-                s = int(getattr(self, "_hole_shrink", 0) or 0)
-                if s > 0:
-                    rect.adjust(s, s, -s, -s)
-                self._hole_rect = rect
-        except Exception:
-            pass
 
 
 class AiOverlay(QWidget):
-    """Standalone overlay host used by capture.py.
-    - Owns an OverlayCanvas and exposes a small API expected by capture.
-    - Mesh/Pose engines are optional; if not wired, methods no-op safely.
-    """
+    """캡처 페이지에서 사용하는 오버레이 래퍼 위젯(안정화)."""
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("AiOverlay")
@@ -322,14 +252,15 @@ class AiOverlay(QWidget):
         lay.setSpacing(0)
         self._overlay = OverlayCanvas(self)
         lay.addWidget(self._overlay, 1)
-        # anchors
-        self._anchor = None  # QWidget to bind the hole
+        self._hole_widget = None
+        self._hole_shrink = 0
+        self._hole_rect: Optional[QRectF] = None
 
-    # --- Public API expected by capture.py ---------------------------------
+    # capture.py에서 기대하는 API ------------------------------------------------
     def refresh_tokens(self, tok: dict) -> None:
         self._overlay.refresh_tokens(tok or {})
 
-    def set_mask_color(self, rgb: Tuple[int, int, int] = (238, 238, 238), alpha: int = 255) -> None:
+    def set_mask_color(self, rgb=(238, 238, 238), alpha: int = 255) -> None:
         self._overlay.set_mask_color(rgb, alpha)
 
     def set_ratio(self, w: int, h: int) -> None:
@@ -342,31 +273,35 @@ class AiOverlay(QWidget):
             self.set_ratio(3, 4)
 
     def bind_hole_widget(self, widget, shrink_px: int = 0) -> None:
+        self._hole_widget = widget
+        self._hole_shrink = int(shrink_px)
+        self._hole_rect = None
+        self.update()
+
+    def update_badges(self, text: str, _metrics: dict) -> None:
+        self._overlay.set_badge(text or "")
+
+    def update_landmarks(self, payload: dict, normalized: bool = False) -> None:
+        self._overlay.set_landmarks(payload, normalized)
+
+    # 내부 유틸 ------------------------------------------------------------------
+    def _recalc_hole_from_widget(self) -> None:
         try:
-            self._hole_widget = widget
-            self._hole_shrink = int(shrink_px)
-            self._hole_rect = None  # widget 우선
-
-            # 부모 크기로 오버레이 맞추고 최상단
-            p = self.parent()
-            if p is not None:
-                try:
-                    self.setGeometry(p.rect())
-                except Exception:
-                    pass
-
-            try:
-                self.show()
-                self.raise_()
-            except Exception:
-                pass
-
-            self.update()
+            if self._hole_widget is not None:
+                w = self._hole_widget
+                r = w.geometry()
+                tl = w.mapTo(self, r.topLeft())
+                br = w.mapTo(self, r.bottomRight())
+                from PySide6.QtCore import QRect
+                rect = QRect(tl, br)
+                s = int(self._hole_shrink or 0)
+                if s > 0:
+                    rect.adjust(s, s, -s, -s)
+                self._overlay.set_hole_rect(rect)
         except Exception:
             pass
 
-    def resizeEvent(self, ev):  # noqa: N802(Qt)
+    def resizeEvent(self, ev) -> None:  # noqa: N802
         super().resizeEvent(ev)
-        self._update_hole_from_anchor()
+        self._recalc_hole_from_widget()
 
-# (Engines removed from this module.)
