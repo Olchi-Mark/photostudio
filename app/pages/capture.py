@@ -918,6 +918,11 @@ class CapturePage(BasePage):
             try:
                 if not getattr(self, "_capturing", False) and hasattr(self, 'guide'):
                     ts = int(time.time() * 1000)
+                    try:
+                        if hasattr(self.guide, 'set_input_source'):
+                            self.guide.set_input_source('sdk' if mode == 'sdk' else 'file')
+                    except Exception:
+                        pass
                     _, _, _metrics0 = self.guide.update(
                         pix.toImage() if isinstance(pix, QPixmap) else img,
                         self.get_ratio(), ts,
@@ -931,6 +936,12 @@ class CapturePage(BasePage):
             # 가이던스/오버레이
             if getattr(self, "_capturing", False) and hasattr(self, 'guide'):
                 ts = int(time.time() * 1000)
+                # 입력 소스 설정: 라이브뷰는 'sdk', 파일 재생은 'file'
+                try:
+                    if hasattr(self.guide, 'set_input_source'):
+                        self.guide.set_input_source('sdk' if mode == 'sdk' else 'file')
+                except Exception:
+                    pass
                 payload, badges, metrics = self.guide.update(
                     pix.toImage() if isinstance(pix, QPixmap) else img,
                     self.get_ratio(), ts,

@@ -46,6 +46,31 @@ class Guidance:
         self._ema: Dict[str, float] = {}
         self._last_badges: Dict[str, str] = {"primary": "", "left": "", "right": ""}
         self._gate: Dict[str, bool] = {"shoulder": False, "eye": False, "yaw": False, "pitch": False}
+        # 입력 소스: 'sdk' | 'file' (미러 보정 용도)
+        self._src: str = 'file'
+
+    # 입력 소스를 설정한다. 라이브뷰('sdk')는 좌우 미러 보정이 필요하다.
+    def set_input_source(self, source: str) -> None:
+        """yaw 정규화를 위한 입력 소스를 설정한다('sdk' 또는 'file')."""
+        try:
+            s = str(source).strip().lower()
+            if s in ('sdk', 'file'):
+                self._src = s
+        except Exception:
+            pass
+
+    @staticmethod
+    def _normalize_yaw_deg(raw_yaw: Optional[float], source: Optional[str]) -> float:
+        """yaw(deg)를 입력 소스에 맞춰 정규화한다. sdk는 미러이므로 부호를 반전한다."""
+        try:
+            if not isinstance(raw_yaw, (int, float)):
+                return 0.0
+            y = float(raw_yaw)
+            if str(source).lower() == 'sdk':
+                y = -y
+            return y
+        except Exception:
+            return 0.0
 
     def reset(self):
         self._last_ts = 0
@@ -158,7 +183,8 @@ class Guidance:
                     yaw = f[k].get("yaw")
                     pitch = f[k].get("pitch")
                     break
-            m["yaw_deg"] = float(yaw) if isinstance(yaw, (int, float)) else 0.0
+            # Yaw 정규화: SDK 입력은 좌우 미러로 인해 부호를 반전한다.
+            m["yaw_deg"] = self._normalize_yaw_deg(yaw, getattr(self, '_src', 'file'))
             m["pitch_deg"] = float(pitch) if isinstance(pitch, (int, float)) else 0.0
             m["has_yaw"] = 1.0 if isinstance(yaw, (int, float)) else 0.0
             m["has_pitch"] = 1.0 if isinstance(pitch, (int, float)) else 0.0
