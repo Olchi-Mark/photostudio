@@ -76,13 +76,13 @@ try:
     if os.getenv("PV_EXHOOK", "1") == "1":
         _install_global_exhook()
 except Exception:
-# 전역 예외 훅: 기본 OFF. PV_EXHOOK가 참값("1/true/on/yes")일 때만 설치한다.
-try:
-    if _env_on("PV_EXHOOK", "0"):
+# 전역 예외 훅: 기본 OFF. PV_EXHOOK가 참값("1/true/on/yes")일 때만 설치 + 종료 훅 등록.
+if _env_on("PV_EXHOOK", "0"):
+    try:
         _install_global_exhook()
-except Exception:
-    pass
-atexit.register(lambda: _state_update(phase="exit"))
+        atexit.register(lambda: _state_update(phase="exit"))
+    except Exception:
+        pass
 
 #──────── 공통 유틸 ────────
 def _json_load(path: str) -> dict:
