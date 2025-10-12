@@ -515,7 +515,10 @@ class CapturePage(BasePage):
             if not getattr(self, "_seq_running", False):
                 try: self._stop_camera()
                 except Exception: pass
-            thumb_path = self._save_preview_thumbnail()
+            # 각 샷 완료 후 프리뷰 스냅샷을 지정 경로/파일명으로 저장
+            thumb_path = self._save_preview_snapshot_indexed(int(idx) if idx is not None else 0)
+            if not thumb_path:
+                thumb_path = self._save_preview_thumbnail()
             try:
                 self.session.setdefault("shot_paths", [])
                 self.session.setdefault("shot_thumbs", [])
@@ -555,6 +558,21 @@ class CapturePage(BasePage):
             out_dir = Path.cwd() / "captures"; out_dir.mkdir(parents=True, exist_ok=True)
             ts = time.strftime("%Y%m%d_%H%M%S"); out = out_dir / f"thumb_{ts}.jpg"
             pm.save(str(out), "JPG", 90); return str(out)
+        except Exception:
+            return None
+
+    # 프리뷰 스냅샷을 인덱스 파일명으로 저장한다.
+    def _save_preview_snapshot_indexed(self, idx: int) -> Optional[str]:
+        try:
+            pm = self.preview_label.pixmap()
+            if not pm or pm.isNull():
+                return None
+            out_dir = Path(r"C:\PhotoBox\cap")
+            out_dir.mkdir(parents=True, exist_ok=True)
+            name = f"thumb_{int(idx)+1:02d}.jpg"
+            out = out_dir / name
+            ok = pm.save(str(out), "JPG", 90)
+            return str(out) if ok else None
         except Exception:
             return None
 
