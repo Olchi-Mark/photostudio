@@ -569,6 +569,11 @@ class CapturePage(BasePage):
                     if thumb_path: arr_cap[eff_i] = thumb_path
                 if 0 <= eff_i < len(arr_raw):
                     if path: arr_raw[eff_i] = path
+                # [CAP] i=.. thumb=.. raw=.. 로그
+                try:
+                    _log.info("[CAP] i=%s thumb=%s raw=%s", eff_i, (thumb_path or ""), (path or ""))
+                except Exception:
+                    pass
             except Exception:
                 pass
             if getattr(self, "_seq_running", False):
