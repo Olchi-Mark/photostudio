@@ -700,7 +700,8 @@ class FaceRollAligner:
         cx = int(fx + fw * 0.5); cy = int(fy + fh * 0.45)
 
         # 회전 레이어
-        M = cv2.getRotationMatrix2D((float(cx), float(cy)), float(angle), 1.0)
+        apply_angle = -float(angle)
+        M = cv2.getRotationMatrix2D((float(cx), float(cy)), apply_angle, 1.0)
         rot = cv2.warpAffine(rgb, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
 
         # 얼굴 타원 마스크 + 턱 힌지(턱-4px~턱+22px: 1→0 감쇠)
@@ -716,7 +717,7 @@ class FaceRollAligner:
         m = cv2.GaussianBlur(m, (0, 0), 9)
 
         out = (rot * m[..., None] + rgb * (1.0 - m[..., None])).astype("uint8")
-        print(f"[pose] local rotate {angle:+.2f}° (chin={chin} hinge=[{y0},{y1}))")
+        print(f"[pose] local rotate {apply_angle:+.2f}° (chin={chin} hinge=[{y0},{y1}))")
         return _qi_from_rgb_np(out)
 
 # -----------------------
@@ -901,7 +902,9 @@ class ShoulderLeveler:
 # Spec crop using crown & chin  (PATCHED)
 # -----------------------
 class SpecCropper:
+    """명세(Head%, Top%)에 맞춰 이미지를 크롭한다."""
     def crop(self, image: QImageLike, *, ratio: Union[Tuple[int,int], str]=(3,4)) -> "QImage":
+        """비율(ratio)에 맞춰 Crown/Chin 추정값으로 최종 크롭을 수행한다."""
         qi = _to_qimage(image)
         if qi is None:
             return image  # type: ignore[return-value]
@@ -982,6 +985,7 @@ class SpecCropper:
 # Pipeline
 # -----------------------
 class RetouchPipeline:
+    """롤 정렬→어깨 수평→눈 균형→명세 크롭 순으로 처리한다."""
     def __init__(self) -> None:
         self.face = FaceRollAligner()
         self.shoulder = ShoulderLeveler()
@@ -997,6 +1001,7 @@ class RetouchPipeline:
         shoulder_strength: float = 1.0,
         eye_balance: bool = True,
     ) -> "QImage":
+        """입력 이미지를 파이프라인에 따라 보정하고 최종 이미지를 반환한다."""
         qi = _to_qimage(img)
         if qi is None:
             raise ValueError("RetouchPipeline.apply: invalid image")
