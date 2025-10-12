@@ -178,8 +178,8 @@ class OverlayCanvas(QWidget):
             # 마스크 채우기(가이드 제외)
             mc = self._TOK.get("mask_color", (238, 238, 238, 255))
             hole = self._hole_rect
+            # 구멍(hole)이 유효하지 않으면 아무 것도 그리지 않는다(기본 투명)
             if hole is None or hole.width() <= 0 or hole.height() <= 0:
-                qp.fillRect(0, 0, W, H, self._rgba(mc))
                 return
             outer = QPainterPath()
             outer.addRect(0, 0, float(W), float(H))
@@ -290,8 +290,11 @@ class AiOverlay(QWidget):
             if self._hole_widget is not None:
                 w = self._hole_widget
                 r = w.geometry()
-                tl = w.mapTo(self, r.topLeft())
-                br = w.mapTo(self, r.bottomRight())
+                # 전역 좌표로 변환 후, 오버레이 좌표로 역변환
+                g_tl = w.mapToGlobal(r.topLeft())
+                g_br = w.mapToGlobal(r.bottomRight())
+                tl = self.mapFromGlobal(g_tl)
+                br = self.mapFromGlobal(g_br)
                 from PySide6.QtCore import QRect
                 rect = QRect(tl, br)
                 s = int(self._hole_shrink or 0)
@@ -304,4 +307,3 @@ class AiOverlay(QWidget):
     def resizeEvent(self, ev) -> None:  # noqa: N802
         super().resizeEvent(ev)
         self._recalc_hole_from_widget()
-
