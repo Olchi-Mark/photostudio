@@ -31,7 +31,7 @@ class OverlayCanvas(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self._ratio: Tuple[int, int] = (3, 4)
         self._hole_rect: Optional[QRectF] = None
@@ -121,7 +121,7 @@ class OverlayCanvas(QWidget):
             return QPointF(hole.left() + x * hole.width(), hole.top() + y * hole.height())
         return QPointF(hole.left() + x, hole.top() + y)
 
-    def _paint_landmarks(self, painter: QPainter, hole: QRectF) -> None:
+    def _paint_landmarks(self, p: QPainter, hole: QRectF) -> None:
         norm = getattr(self, "_lm_normalized", False)
         payload = getattr(self, "_lm_payload", None) or {}
         r = float(self._TOK.get("pt_radius", 3))
@@ -132,26 +132,26 @@ class OverlayCanvas(QWidget):
             # tiny-dot mode: diameter 3px (no outline)
             if r <= 0:
                 qcolor = self._rgba(color)
-                painter.setPen(Qt.NoPen)
-                painter.setBrush(qcolor)
-                for p in pts:
-                    qpt = self._map_pt(p, hole, norm)
-                    painter.drawEllipse(qpt, 1.5, 1.5)
+                p.setPen(Qt.NoPen)
+                p.setBrush(qcolor)
+                for _pt in pts:
+                    qpt = self._map_pt(_pt, hole, norm)
+                    p.drawEllipse(qpt, 1.5, 1.5)
                 return
             # outer ring for contrast
             oc = self._rgba((0, 0, 0, 255))
             pen_o = QPen(oc); pen_o.setWidth(2)
-            painter.setPen(pen_o); painter.setBrush(Qt.NoBrush)
-            for p in pts:
-                qpt = self._map_pt(p, hole, norm)
-                painter.drawEllipse(qpt, r+1.5, r+1.5)
+            p.setPen(pen_o); p.setBrush(Qt.NoBrush)
+            for _pt in pts:
+                qpt = self._map_pt(_pt, hole, norm)
+                p.drawEllipse(qpt, r+1.5, r+1.5)
             # inner fill
             qcolor = self._rgba(color)
             pen_i = QPen(qcolor); pen_i.setWidth(1)
-            painter.setPen(pen_i); painter.setBrush(qcolor)
-            for p in pts:
-                qpt = self._map_pt(p, hole, norm)
-                painter.drawEllipse(qpt, r, r)
+            p.setPen(pen_i); p.setBrush(qcolor)
+            for _pt in pts:
+                qpt = self._map_pt(_pt, hole, norm)
+                p.drawEllipse(qpt, r, r)
 
         def draw_poly(pts, color, width=2, dashed=False):
             if not pts or len(pts) < 2:
@@ -167,12 +167,12 @@ class OverlayCanvas(QWidget):
                     pen.setDashPattern([6, 4])
                 except Exception:
                     pass
-            painter.setPen(pen); painter.setBrush(Qt.NoBrush)
+            p.setPen(pen); p.setBrush(Qt.NoBrush)
             from PySide6.QtGui import QPainterPath
             path = QPainterPath(qpts[0])
             for q in qpts[1:]:
                 path.lineTo(q)
-            painter.drawPath(path)
+            p.drawPath(path)
 
         # pro mesh first (faint)
         if bool(self._TOK.get("pro_mode", False)):
@@ -193,7 +193,9 @@ class OverlayCanvas(QWidget):
 
     # --- Paint ---------------------------------------------------------------
     def paintEvent(self, ev) -> None:  # noqa
-        painter = QPainter(self)
+        p = QPainter()
+        if not p.begin(self):
+            return
     
         # 부모 크기 동기화 + 구멍 재계산(안전)
         try:
@@ -225,7 +227,7 @@ class OverlayCanvas(QWidget):
             mc = self._TOK.get("mask_color", (238, 238, 238, 255))
             hole = self._hole_rect
             if hole is None or hole.width() <= 0 or hole.height() <= 0:
-                painter.fillRect(0, 0, W, H, self._rgba(mc))
+                p.fillRect(0, 0, W, H, self._rgba(mc))
                 # 디버그: 마스크가 안 보일 때 크기 확인
                 # print(f"[OverlayCanvas] mask-only W={W} H={H} mc={mc}")
                 return
@@ -238,7 +240,7 @@ class OverlayCanvas(QWidget):
                 hole_path.addRect(hole)
             outer.addPath(hole_path)
             outer.setFillRule(Qt.OddEvenFill)
-            painter.fillPath(outer, self._rgba(mc))
+            p.fillPath(outer, self._rgba(mc))
 
             guide_rect = QRectF(hole)
 
@@ -256,29 +258,32 @@ class OverlayCanvas(QWidget):
                         pen.setDashPattern([6, 4])
                     except Exception:
                         pass
-                painter.setPen(pen)
-                painter.setBrush(Qt.NoBrush)
+                p.setPen(pen)
+                p.setBrush(Qt.NoBrush)
                 radius = float(self._TOK.get("round", 0))
                 if radius > 0:
-                    painter.drawRoundedRect(guide_rect, radius, radius)
+                    p.drawRoundedRect(guide_rect, radius, radius)
                 else:
-                    painter.drawRect(guide_rect)
+                    p.drawRect(guide_rect)
 
             # 2.5) debug crosshair if enabled
             if getattr(self, "_dbg_cross", False):
                 center = guide_rect.center()
                 pen = QPen(self._rgba((255, 0, 0, 255)))
                 pen.setWidth(2)
-                painter.setPen(pen)
-                painter.drawLine(center.x()-24, center.y(), center.x()+24, center.y())
-                painter.drawLine(center.x(), center.y()-24, center.x(), center.y()+24)
+                p.setPen(pen)
+                p.drawLine(center.x()-24, center.y(), center.x()+24, center.y())
+                p.drawLine(center.x(), center.y()-24, center.x(), center.y()+24)
 
             # 3) 랜드마크 점 렌더
             payload = getattr(self, "_lm_payload", None)
             if payload:
-                self._paint_landmarks(painter, guide_rect)
+                self._paint_landmarks(p, guide_rect)
+        except Exception as ex:
+            print("[OV] paint error:", ex)
         finally:
-            painter.end()
+            if p.isActive():
+                p.end()
 # === Public Overlay Widget ========================================
     def _recalc_hole_from_widget(self):
         try:
@@ -305,7 +310,8 @@ class AiOverlay(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("AiOverlay")
-        self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
