@@ -199,15 +199,16 @@ class OverlayCanvas(QWidget):
     
         # 부모 크기 동기화 + 구멍 재계산(안전)
         try:
-            p = self.parent()
-            if p is not None:
-                self.setGeometry(p.rect())
+            parent_w = self.parent()
+            # 안정성: paint 중 기하 변경(setGeometry) 금지. 홀만 재계산.
+            # if parent_w is not None:
+            #     self.setGeometry(parent_w.rect())
             if hasattr(self, "_recalc_hole_from_widget"):
                 self._recalc_hole_from_widget()
         except Exception:
             pass
 
-            W, H = self.width(), self.height()
+        W, H = self.width(), self.height()
 
             # 구멍 영역 계산
             if self._hole_rect is not None:
