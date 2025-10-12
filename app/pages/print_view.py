@@ -66,7 +66,12 @@ def _install_global_exhook():
             sys.__excepthook__(etype, e, tb)
     sys.excepthook = _exhook
 
-_install_global_exhook()
+# 전역 훅 환경변수 가드: 기본 ON("1"), "0"이면 설치 생략
+try:
+    if os.getenv("PV_EXHOOK", "1") == "1":
+        _install_global_exhook()
+except Exception:
+    _install_global_exhook()
 atexit.register(lambda: _state_update(phase="exit"))
 
 #──────── 공통 유틸 ────────

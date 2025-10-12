@@ -193,13 +193,13 @@ class OverlayCanvas(QWidget):
 
     # --- Paint ---------------------------------------------------------------
     def paintEvent(self, ev) -> None:  # noqa
-        p = QPainter()
-        if not p.begin(self):
+        qp = QPainter()
+        if not qp.begin(self):
             return
     
         # 부모 크기 동기화 + 구멍 재계산(안전)
         try:
-            parent_w = self.parent()
+            pw = self.parent()
             # 안정성: paint 중 기하 변경(setGeometry) 금지. 홀만 재계산.
             # if parent_w is not None:
             #     self.setGeometry(parent_w.rect())
@@ -228,7 +228,7 @@ class OverlayCanvas(QWidget):
             mc = self._TOK.get("mask_color", (238, 238, 238, 255))
             hole = self._hole_rect
             if hole is None or hole.width() <= 0 or hole.height() <= 0:
-                p.fillRect(0, 0, W, H, self._rgba(mc))
+                qp.fillRect(0, 0, W, H, self._rgba(mc))
                 # 디버그: 마스크가 안 보일 때 크기 확인
                 # print(f"[OverlayCanvas] mask-only W={W} H={H} mc={mc}")
                 return
@@ -241,7 +241,7 @@ class OverlayCanvas(QWidget):
                 hole_path.addRect(hole)
             outer.addPath(hole_path)
             outer.setFillRule(Qt.OddEvenFill)
-            p.fillPath(outer, self._rgba(mc))
+            qp.fillPath(outer, self._rgba(mc))
 
             guide_rect = QRectF(hole)
 
@@ -259,32 +259,32 @@ class OverlayCanvas(QWidget):
                         pen.setDashPattern([6, 4])
                     except Exception:
                         pass
-                p.setPen(pen)
-                p.setBrush(Qt.NoBrush)
+                qp.setPen(pen)
+                qp.setBrush(Qt.NoBrush)
                 radius = float(self._TOK.get("round", 0))
                 if radius > 0:
-                    p.drawRoundedRect(guide_rect, radius, radius)
+                    qp.drawRoundedRect(guide_rect, radius, radius)
                 else:
-                    p.drawRect(guide_rect)
+                    qp.drawRect(guide_rect)
 
             # 2.5) debug crosshair if enabled
             if getattr(self, "_dbg_cross", False):
                 center = guide_rect.center()
                 pen = QPen(self._rgba((255, 0, 0, 255)))
                 pen.setWidth(2)
-                p.setPen(pen)
-                p.drawLine(center.x()-24, center.y(), center.x()+24, center.y())
-                p.drawLine(center.x(), center.y()-24, center.x(), center.y()+24)
+                qp.setPen(pen)
+                qp.drawLine(center.x()-24, center.y(), center.x()+24, center.y())
+                qp.drawLine(center.x(), center.y()-24, center.x(), center.y()+24)
 
             # 3) 랜드마크 점 렌더
             payload = getattr(self, "_lm_payload", None)
             if payload:
-                self._paint_landmarks(p, guide_rect)
+                self._paint_landmarks(qp, guide_rect)
         except Exception as ex:
             print("[OV] paint error:", ex)
         finally:
-            if p.isActive():
-                p.end()
+            if qp.isActive():
+                qp.end()
 # === Public Overlay Widget ========================================
     def _recalc_hole_from_widget(self):
         try:
