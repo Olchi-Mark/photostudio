@@ -1,4 +1,5 @@
 ﻿# main.py
+# Photostudio 애플리케이션의 엔트리 포인트를 정의한다
 import sys, os
 ROOT = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
@@ -23,9 +24,7 @@ from app.config.loader import (
     config_save_settings_atomic,
 )
 
-#─────────────────────────────────────────────
-#  main(): entry point
-#─────────────────────────────────────────────
+# main(): Photostudio Qt 애플리케이션을 초기화하고 실행하는 진입점
 def main():
     # DPI 잠금(배율 무시: 물리 픽셀 1:1)
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")   # Qt 자체 HighDPI 스케일 끔
@@ -100,5 +99,7 @@ def main():
 
     return app.exec()
 
+# 모듈이 직접 실행될 때 애플리케이션을 구동한다
 if __name__ == "__main__":
     sys.exit(main())
+# 테스트하는중입니다.
