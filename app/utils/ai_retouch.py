@@ -11,6 +11,8 @@ import os, math, cv2, threading, atexit
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
+
+RESPECT_EXIF_ORIENTATION = False
 # ─────────────────────────────────────────────
 # Debug
 # ─────────────────────────────────────────────
