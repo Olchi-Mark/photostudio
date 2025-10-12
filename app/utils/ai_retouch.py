@@ -1,9 +1,9 @@
-# -*- coding: utf-8 -*-
-# app/utils/ai_retouch.py — ID/Resume photo AI retouch pipeline (Tasks)
-# Spec: (3,4)=30×40 → Head 52–58%H, Top 6–10%H
-#       (7,9)=35×45 → Head 73–78%H, Top 6–8%H
-# Pipeline: 1) Face roll align(head-only) → 2) Shoulder level(below chin)
-#           3) Eye-size balance(small-only) → 4) Crown&Chin estimate → 5) Spec crop → 6) Save
+﻿# -*- coding: utf-8 -*-
+# app/utils/ai_retouch.py ??ID/Resume photo AI retouch pipeline (Tasks)
+# Spec: (3,4)=30횞40 ??Head 52??8%H, Top 6??0%H
+#       (7,9)=35횞45 ??Head 73??8%H, Top 6??%H
+# Pipeline: 1) Face roll align(head-only) ??2) Shoulder level(below chin)
+#           3) Eye-size balance(small-only) ??4) Crown&Chin estimate ??5) Spec crop ??6) Save
 
 from __future__ import annotations
 from typing import Union, Tuple
@@ -13,16 +13,16 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
 
 RESPECT_EXIF_ORIENTATION = False
-# ─────────────────────────────────────────────
+# ?????????????????????????????????????????????
 # Debug
-# ─────────────────────────────────────────────
+# ?????????????????????????????????????????????
 
 #Debug_mod: bool = True
 Debug_mod: bool = False
-DEBUG_POINTS_ONLY: bool = False   # 점만 찍기 모드
+DEBUG_POINTS_ONLY: bool = False   # ?먮쭔 李띻린 紐⑤뱶
 #DEBUG_POINTS_ONLY: bool = True
-DOT_R: int = 4                   # 일반 포인트 반지름(픽셀)  ← 2 → 4 로 키움
-DOT_R_CROWN: int = 7             # crown/chin 강조 점 크기
+DOT_R: int = 4                   # ?쇰컲 ?ъ씤??諛섏?由??쎌?)  ??2 ??4 濡??ㅼ?
+DOT_R_CROWN: int = 7             # crown/chin 媛뺤“ ???ш린
 
 from typing import Dict, Tuple, Any
 import json, os
@@ -74,17 +74,17 @@ def _resolve_settings_path() -> str:
 SETTINGS_PATH = _resolve_settings_path()
 
 DEFAULT_PROFILES: Dict[str, Dict[str, Tuple[float, float]]] = {
-    # 가이드 디폴트(단위: 비율 0~1)
+    # 媛?대뱶 ?뷀뤃???⑥쐞: 鍮꾩쑉 0~1)
     "3545": {"head_pct_range": (0.73, 0.78), "top_pct_range": (0.06, 0.08)},
     "3040": {"head_pct_range": (0.52, 0.58), "top_pct_range": (0.06, 0.10)},
 }
 
 def _to_range01(v: Any) -> Tuple[float, float]:
     """
-    입력 형식 허용:
-      - [0.73, 0.78]  또는 [73, 78]
-      - {"min": 73, "max": 78}  또는 {"min":0.73,"max":0.78}
-    반환: (min01, max01)
+    ?낅젰 ?뺤떇 ?덉슜:
+      - [0.73, 0.78]  ?먮뒗 [73, 78]
+      - {"min": 73, "max": 78}  ?먮뒗 {"min":0.73,"max":0.78}
+    諛섑솚: (min01, max01)
     """
     if isinstance(v, dict):
         a, b = v.get("min"), v.get("max")
@@ -93,7 +93,7 @@ def _to_range01(v: Any) -> Tuple[float, float]:
     else:
         raise ValueError("invalid range")
     a = float(a); b = float(b)
-    if a > 1.0 or b > 1.0:  # 퍼센트 → 비율
+    if a > 1.0 or b > 1.0:  # ?쇱꽱????鍮꾩쑉
         a /= 100.0; b /= 100.0
     if a > b:
         a, b = b, a
@@ -148,8 +148,8 @@ def _ratio_key_from_param(ratio: Any) -> str:
 
 def get_profile_spec(ratio: Any) -> Dict[str, float]:
     """
-    ratio: 3040 또는 3545(문자/숫자 모두 허용)
-    반환:
+    ratio: 3040 ?먮뒗 3545(臾몄옄/?レ옄 紐⑤몢 ?덉슜)
+    諛섑솚:
       head_pct_min, head_pct_max, top_pct_min, top_pct_max, head_target, top_target
     """
     key = _ratio_key_from_param(ratio)
@@ -158,12 +158,12 @@ def get_profile_spec(ratio: Any) -> Dict[str, float]:
         if os.path.isfile(SETTINGS_PATH):
             profiles.update(_load_profiles_from_file(SETTINGS_PATH))
         else:
-            print(f"[settings] not found → defaults: {SETTINGS_PATH}")
+            print(f"[settings] not found ??defaults: {SETTINGS_PATH}")
     except Exception as e:
-        print(f"[settings] load error → defaults: {e}")
+        print(f"[settings] load error ??defaults: {e}")
 
     if key not in profiles:
-        print(f"[settings] unknown ratio={key} → fallback 3545")
+        print(f"[settings] unknown ratio={key} ??fallback 3545")
         key = "3545"
 
     head_min, head_max = profiles[key]["head_pct_range"]
@@ -210,7 +210,7 @@ def _select_ratio_from_settings(default: str = "3545") -> Union[str, Tuple[int, 
         return "3040"
     return default
 def _collect_debug_points(rgb):
-    """얼굴 478포인트(가능시) + 포즈 주요포인트 일부(코, 귀, 어깨) 픽셀 좌표 수집"""
+    """?쇨뎬 478?ъ씤??媛?μ떆) + ?ъ쫰 二쇱슂?ъ씤???쇰?(肄? 洹, ?닿묠) ?쎌? 醫뚰몴 ?섏쭛"""
     H, W = rgb.shape[:2]
     pts = []
 
@@ -232,7 +232,7 @@ def _collect_debug_points(rgb):
         except Exception:
             pass
 
-    # 3) Pose(어깨/코/귀) 일부
+    # 3) Pose(?닿묠/肄?洹) ?쇰?
     plms = _mp_pose_landmarks(rgb)
     if plms:
         for i in [0, 7, 8, 11, 12]:  # nose, L/R ear, L/R shoulder
@@ -241,7 +241,7 @@ def _collect_debug_points(rgb):
             except Exception:
                 pass
 
-    # 4) 최후: 얼굴 Haar bbox 모서리 4점
+    # 4) 理쒗썑: ?쇨뎬 Haar bbox 紐⑥꽌由?4??
     if not pts:
         try:
             face_cascade = EyeDetector._load_cascade('haarcascade_frontalface_default.xml')
@@ -266,10 +266,10 @@ class _DebugPointsRenderer:
         q = qi.convertToFormat(getattr(qi, "Format").Format_RGB888)
         rgb = _rgb_from_qimage(q)
 
-        # 기본 포인트(얼굴 478 + 포즈 일부 등)
+        # 湲곕낯 ?ъ씤???쇨뎬 478 + ?ъ쫰 ?쇰? ??
         pts = _collect_debug_points(rgb)
 
-        # crown/chin/eye_cx 도출해서 ‘굵은 점’으로 별도 표시
+        # crown/chin/eye_cx ?꾩텧?댁꽌 ?섍도? ?먥숈쑝濡?蹂꾨룄 ?쒖떆
         crown_pt = chin_pt = eye_pt = None
         try:
             crown, chin, eye_cx, W, H, _ = CrownChinEstimator().estimate(qi, return_dbg=True)
@@ -354,8 +354,8 @@ class SpecRanges:
     top_pct: Tuple[float, float]            # (crown - top) / H
 
 RATIO_PRESETS: Dict[Tuple[int, int], SpecRanges] = {
-    (3, 4): SpecRanges((3, 4), (0.52, 0.58), (0.06, 0.10)),  # 30×40
-    (7, 9): SpecRanges((7, 9), (0.73, 0.78), (0.06, 0.08)),  # 35×45
+    (3, 4): SpecRanges((3, 4), (0.52, 0.58), (0.06, 0.10)),  # 30횞40
+    (7, 9): SpecRanges((7, 9), (0.73, 0.78), (0.06, 0.08)),  # 35횞45
 }
 
 # -----------------------
@@ -368,7 +368,7 @@ def _qi_rgb888_format(_QImage):
         return getattr(_QImage, "Format_RGB888")
 
 def _rgb_from_qimage(q: "QImage"):
-    # QImage → writable C-contig RGB ndarray (HxWx3, uint8)
+    # QImage ??writable C-contig RGB ndarray (HxWx3, uint8)
     from PySide6.QtGui import QImage as _QImage
     import numpy as np
     q2 = q.convertToFormat(_qi_rgb888_format(_QImage))
@@ -386,7 +386,7 @@ def _rgb_from_qimage(q: "QImage"):
     except Exception:
         buf = bytes(ptr)
     arr = np.frombuffer(buf, dtype="uint8").reshape((h, bpl))[:, : w * 3]
-    rgb = arr.reshape(h, w, 3).copy()  # copy → writeable
+    rgb = arr.reshape(h, w, 3).copy()  # copy ??writeable
     return rgb
 
 def _qi_from_rgb_np(arr: Any) -> "QImage":
@@ -551,7 +551,7 @@ class EyeDetector:
         rgb = _rgb_from_qimage(q)
         H, W = rgb.shape[:2]
 
-        # Tasks 우선
+        # Tasks ?곗꽑
         mp_res = _mp_face_landmarks(rgb)
         if mp_res is not None:
             lms, _ = mp_res
@@ -582,7 +582,7 @@ class EyeDetector:
         except Exception:
             pass
 
-        # Haar 폴백
+        # Haar ?대갚
         face_cascade = self._load_cascade('haarcascade_frontalface_default.xml')
         eye_cascade  = self._load_cascade('haarcascade_eye_tree_eyeglasses.xml')
         gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
@@ -610,7 +610,7 @@ class EyeDetector:
         return Eyes(True, infos[0], infos[-1])
 
 class EyeBalancer:
-    """작은 쪽만 확장(축소 금지), 최대 +20%"""
+    """?묒? 履쎈쭔 ?뺤옣(異뺤냼 湲덉?), 理쒕? +20%"""
     def adjust(self, image: QImageLike, strength: float = 0.45, *, enable: bool = True) -> "QImage":
         qi = _to_qimage(image)
         if qi is None or not enable:
@@ -654,7 +654,7 @@ class EyeBalancer:
         out = rgb.copy()
         out = warp_eye(L, sxL, syL, out)
         out = warp_eye(R, sxR, syR, out)
-        print(f"[eyes] scales  smaller={smaller}  L→(sx{sxL:.3f},sy{syL:.3f})  R→(sx{sxR:.3f},sy{syR:.3f})")
+        print(f"[eyes] scales  smaller={smaller}  L??sx{sxL:.3f},sy{syL:.3f})  R??sx{sxR:.3f},sy{syR:.3f})")
         return _qi_from_rgb_np(out)
 
 # -----------------------
@@ -670,7 +670,7 @@ class FaceRollAligner:
         rgb = _rgb_from_qimage(q)
         H, W = rgb.shape[:2]
 
-        # eyes slope → angle (부호: 오른쪽 눈이 낮으면 +dy → -θ)
+        # eyes slope ??angle (遺?? ?ㅻⅨ履??덉씠 ??쑝硫?+dy ??-罐)
         ed = EyeDetector().detect(qi)
         angle = 0.0
         if ed.ok and ed.left and ed.right:
@@ -678,17 +678,17 @@ class FaceRollAligner:
             dy = ed.right.cy - ed.left.cy
             if abs(dx) > 1e-6:
                 angle = -math.degrees(math.atan2(dy, dx))
-        # 과도 회전 보호
+        # 怨쇰룄 ?뚯쟾 蹂댄샇
         max_rot = 15.0
         angle = max(-max_rot, min(max_rot, angle))
         if abs(angle) < 0.8:
-            print(f"[pose] roll_face≈0 → skip")
+            print(f"[pose] roll_face?? ??skip")
             return qi
 
         # crown/chin
         crown, chin, _, _, _ = CrownChinEstimator().estimate(qi)
 
-        # 회전 중심: 얼굴 bbox 없을 때는 crown~chin 기반 추정
+        # ?뚯쟾 以묒떖: ?쇨뎬 bbox ?놁쓣 ?뚮뒗 crown~chin 湲곕컲 異붿젙
         fb = None
         mp = _mp_face_landmarks(rgb)
         if mp is not None:
@@ -699,16 +699,16 @@ class FaceRollAligner:
             fx, fy, fw, fh = fb
         cx = int(fx + fw * 0.5); cy = int(fy + fh * 0.45)
 
-        # 회전 레이어
+        # ?뚯쟾 ?덉씠??
         apply_angle = -float(angle)
         M = cv2.getRotationMatrix2D((float(cx), float(cy)), apply_angle, 1.0)
         rot = cv2.warpAffine(rgb, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
 
-        # 얼굴 타원 마스크 + 턱 힌지(턱-4px~턱+22px: 1→0 감쇠)
-        rx = int(fw * 0.60); ry = int(fh * 0.75)
+        # ?쇨뎬 ???留덉뒪??+ ???뚯?(??4px~??22px: 1?? 媛먯뇿)
+        rx = int(fw * 0.60); ry = int(fh * 0.65)
         m = np.zeros((H, W), np.float32)
         cv2.ellipse(m, (cx, cy), (max(8, rx), max(8, ry)), 0, 0, 360, 1.0, -1, cv2.LINE_AA)
-        y0 = int(max(0, chin - 4)); y1 = int(min(H - 1, chin + 22))
+        y0 = int(max(0, chin - 4)); y1 = int(min(H - 1, chin + 10))
         if y1 > y0:
             ramp = np.linspace(1.0, 0.0, y1 - y0, dtype=np.float32)
             m[y0:y1, :] *= ramp[:, None]
@@ -717,7 +717,7 @@ class FaceRollAligner:
         m = cv2.GaussianBlur(m, (0, 0), 9)
 
         out = (rot * m[..., None] + rgb * (1.0 - m[..., None])).astype("uint8")
-        print(f"[pose] local rotate {apply_angle:+.2f}° (chin={chin} hinge=[{y0},{y1}))")
+        print(f"[pose] local rotate {apply_angle:+.2f}째 (chin={chin} hinge=[{y0},{y1}))")
         return _qi_from_rgb_np(out)
 
 # -----------------------
@@ -725,7 +725,7 @@ class FaceRollAligner:
 # -----------------------
 class CrownChinEstimator:
     def estimate(self, image: QImageLike, *, return_dbg: bool = False):
-        """Return (crown_y, chin_y, eye_cx, W, H)  [Debug_mod/return_dbg=True이면 + dbg_pts]"""
+        """Return (crown_y, chin_y, eye_cx, W, H)  [Debug_mod/return_dbg=True?대㈃ + dbg_pts]"""
         qi = _to_qimage(image)
         if qi is None:
             raise ValueError("CrownChinEstimator.estimate: invalid image")
@@ -737,7 +737,7 @@ class CrownChinEstimator:
         dbg_pts = []
 
         y_crown = None; y_chin = None; x_eye_mid = W//2
-        # 1) Legacy FaceMesh — landmark id 이용(정밀)
+        # 1) Legacy FaceMesh ??landmark id ?댁슜(?뺣?)
         try:
             import mediapipe as mp
             with mp.solutions.face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True) as fm:
@@ -761,7 +761,7 @@ class CrownChinEstimator:
         except Exception:
             y_crown = None
 
-        # 2) Pose 폴백
+        # 2) Pose ?대갚
         if y_crown is None or y_chin is None:
             lms = _mp_pose_landmarks(rgb)
             if lms:
@@ -780,7 +780,7 @@ class CrownChinEstimator:
                 y_chin  = float(np.clip((nose + 1.6*(nose-s))[1], 0, H-1))
                 x_eye_mid = int(np.clip(m[0], 0, W-1))
 
-        # 3) 상단 엣지 미세 보정(흰 배경 가정)
+        # 3) ?곷떒 ?ｌ? 誘몄꽭 蹂댁젙(??諛곌꼍 媛??
         try:
             lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)
             L = lab[...,0].astype("float32")
@@ -803,7 +803,7 @@ class CrownChinEstimator:
         except Exception:
             pass
 
-        # 4) Haar 최후 폴백
+        # 4) Haar 理쒗썑 ?대갚
         if y_crown is None or y_chin is None:
             try:
                 face_cascade = EyeDetector._load_cascade('haarcascade_frontalface_default.xml')
@@ -856,7 +856,7 @@ class ShoulderLeveler:
 
         lms = _mp_pose_landmarks(rgb)
         if not lms:
-            print("[shoulder] no pose → skip")
+            print("[shoulder] no pose ??skip")
             return qi
 
         def P(i): return (lms[i].x * W, lms[i].y * H)
@@ -865,7 +865,7 @@ class ShoulderLeveler:
 
         slope = float(math.degrees(math.atan2((yR - yL), (xR - xL))))
         if abs(slope) < 1.2:
-            print("[shoulder] slope≈0 → skip")
+            print("[shoulder] slope?? ??skip")
             return qi
 
         crown, chin, _, _, _ = CrownChinEstimator().estimate(qi)
@@ -874,13 +874,13 @@ class ShoulderLeveler:
         m_req = -math.tan(math.radians(slope))
         m = float(max(-math.tan(math.radians(max_deg)), min(math.tan(math.radians(max_deg)), m_req*max(0.0, min(1.0, strength)))))
         # Limit over-correction with a shear cap (safety)
-        SHEAR_CAP = 0.14  # approx tan(8°)
+        SHEAR_CAP = 0.14  # approx tan(8째)
         if m > SHEAR_CAP:
             m = SHEAR_CAP
         elif m < -SHEAR_CAP:
             m = -SHEAR_CAP
 
-        # x' = x + m*(y - y0)  → y0=y_seam을 정확히 사용
+        # x' = x + m*(y - y0)  ??y0=y_seam???뺥솗???ъ슜
         M = np.array([[1.0, m, -m * y_seam], [0.0, 1.0, 0.0]], np.float32)
         sheared = cv2.warpAffine(rgb, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
 
@@ -892,7 +892,7 @@ class ShoulderLeveler:
         mask[y_seam:, 0] = 1.0
         mask = np.repeat(mask, W, axis=1)
         out = (sheared * mask[..., None] + rgb * (1.0 - mask[..., None])).astype("uint8")
-        print(f"[shoulder] slope={slope:+.2f}° seam_y={y_seam} m={m:+.5f}")
+        print(f"[shoulder] slope={slope:+.2f}째 seam_y={y_seam} m={m:+.5f}")
         return _qi_from_rgb_np(out)
 
 # -----------------------
@@ -902,9 +902,9 @@ class ShoulderLeveler:
 # Spec crop using crown & chin  (PATCHED)
 # -----------------------
 class SpecCropper:
-    """명세(Head%, Top%)에 맞춰 이미지를 크롭한다."""
+    """紐낆꽭(Head%, Top%)??留욎떠 ?대?吏瑜??щ∼?쒕떎."""
     def crop(self, image: QImageLike, *, ratio: Union[Tuple[int,int], str]=(3,4)) -> "QImage":
-        """비율(ratio)에 맞춰 Crown/Chin 추정값으로 최종 크롭을 수행한다."""
+        """鍮꾩쑉(ratio)??留욎떠 Crown/Chin 異붿젙媛믪쑝濡?理쒖쥌 ?щ∼???섑뻾?쒕떎."""
         qi = _to_qimage(image)
         if qi is None:
             return image  # type: ignore[return-value]
@@ -919,7 +919,7 @@ class SpecCropper:
         else:
             crown, chin, eye_cx, W, H = est
 
-        # ----- ratio 키/종횡비 결정 -----
+        # ----- ratio ??醫낇슒鍮?寃곗젙 -----
         ratio_key: str
         if isinstance(ratio, str):
             ratio_key = ratio
@@ -932,10 +932,10 @@ class SpecCropper:
             elif (rw, rh) == (7, 9):
                 ratio_key = "3545"
             else:
-                # 종횡비로 추정
+                # 醫낇슒鍮꾨줈 異붿젙
                 ratio_key = "3040" if abs(aspect - 0.75) < abs(aspect - 7/9) else "3545"
 
-        # ----- settings.json 적용(실패 시 디폴트) -----
+        # ----- settings.json ?곸슜(?ㅽ뙣 ???뷀뤃?? -----
         prof = get_profile_spec(ratio_key)
         head_lo, head_hi = prof["head_pct_min"], prof["head_pct_max"]
         top_lo,  top_hi  = prof["top_pct_min"],  prof["top_pct_max"]
@@ -943,19 +943,19 @@ class SpecCropper:
         import numpy as np, cv2
         head_span = max(1, chin - crown)
 
-        # 1) crop_h 결정(Head% 기준)
+        # 1) crop_h 寃곗젙(Head% 湲곗?)
         Hmin  = head_span / float(head_hi)
         Hmax  = head_span / float(head_lo)
         Hgeom = min(H, int(W / aspect))
         crop_h = int(round(min(max(0.5 * (Hmin + min(Hmax, Hgeom)), 1.0), max(Hgeom, 1))))
         crop_w = int(round(crop_h * aspect))
 
-        # 2) Top% 중앙값으로 배치
+        # 2) Top% 以묒븰媛믪쑝濡?諛곗튂
         t_target = 0.5 * (top_lo + top_hi)
         x_tgt = int(round(eye_cx - crop_w * 0.5))
         y_tgt = int(round(crown - t_target * crop_h))
 
-        # 3) 패딩(흰색)
+        # 3) ?⑤뵫(?곗깋)
         pad_top    = max(0, -y_tgt)
         pad_bottom = max(0, (y_tgt + crop_h) - H)
         pad_left   = max(0, -x_tgt)
@@ -968,7 +968,7 @@ class SpecCropper:
             x_tgt += pad_left; y_tgt += pad_top
             print(f"[crop] padded t/b/l/r = {pad_top},{pad_bottom},{pad_left},{pad_right}")
 
-        # 4) 최종 크롭
+        # 4) 理쒖쥌 ?щ∼
         x = max(0, min(W - crop_w, x_tgt))
         y = max(0, min(H - crop_h, y_tgt))
         crop = np.ascontiguousarray(rgb[y:y+crop_h, x:x+crop_w])
@@ -985,7 +985,7 @@ class SpecCropper:
 # Pipeline
 # -----------------------
 class RetouchPipeline:
-    """롤 정렬→어깨 수평→눈 균형→명세 크롭 순으로 처리한다."""
+    """濡??뺣젹?믪뼱源??섑룊?믩늿 洹좏삎?믩챸???щ∼ ?쒖쑝濡?泥섎━?쒕떎."""
     def __init__(self) -> None:
         self.face = FaceRollAligner()
         self.shoulder = ShoulderLeveler()
@@ -1001,17 +1001,17 @@ class RetouchPipeline:
         shoulder_strength: float = 1.0,
         eye_balance: bool = True,
     ) -> "QImage":
-        """입력 이미지를 파이프라인에 따라 보정하고 최종 이미지를 반환한다."""
+        """?낅젰 ?대?吏瑜??뚯씠?꾨씪?몄뿉 ?곕씪 蹂댁젙?섍퀬 理쒖쥌 ?대?吏瑜?諛섑솚?쒕떎."""
         qi = _to_qimage(img)
         if qi is None:
             raise ValueError("RetouchPipeline.apply: invalid image")
 
-        # ★ 점만 찍기 모드: 나머지 단계 전부 스킵하고 바로 종료
+        # ???먮쭔 李띻린 紐⑤뱶: ?섎㉧吏 ?④퀎 ?꾨? ?ㅽ궢?섍퀬 諛붾줈 醫낅즺
         if DEBUG_POINTS_ONLY:
-            print("[debug] DEBUG_POINTS_ONLY=True → skip face/shoulder/eyes/crop")
+            print("[debug] DEBUG_POINTS_ONLY=True ??skip face/shoulder/eyes/crop")
             return _DebugPointsRenderer().render(qi)
 
-        # (아래는 정상 파이프라인, 현재 모드에선 실행되지 않음)
+        # (?꾨옒???뺤긽 ?뚯씠?꾨씪?? ?꾩옱 紐⑤뱶?먯꽑 ?ㅽ뻾?섏? ?딆쓬)
         q1 = self.face.align(qi, mode=face_align_mode)
         q2 = self.shoulder.level(q1, strength=shoulder_strength)
         q3 = self.eyes.adjust(q2, strength=0.4, enable=eye_balance)
@@ -1019,19 +1019,19 @@ class RetouchPipeline:
         return q4
 
 # -----------------------
-# File entry (호출부와 호환 유지)
+# File entry (?몄텧遺? ?명솚 ?좎?)
 # -----------------------
 def process_file(
     in_path: str,
     out_path: str,
     *,
-    ratio: Union[Tuple[int,int], str] = (3,4),   # "3040" / "3545" 또는 (3,4)/(7,9)
+    ratio: Union[Tuple[int,int], str] = (3,4),   # "3040" / "3545" ?먮뒗 (3,4)/(7,9)
     face_align_mode: str = "local",
     shoulder_strength: float = 1.0,
     eye_balance: bool = False,
 ) -> bool:
     try:
-        print(f"[retouch] start: {in_path} → {out_path}")
+        print(f"[retouch] start: {in_path} ??{out_path}")
         qi = _to_qimage(in_path)
         if qi is None:
             print("[retouch] load fail")
@@ -1058,7 +1058,7 @@ def process_fixed_paths(*, ratio_default: str = "3545",
     """Process using fixed input/output from settings.json.
     - Input:  paths.origin (fallback C:\\PhotoBox\\origin_photo.jpg)
     - Output: paths.ai_out (fallback C:\\PhotoBox\\ai_origin_photo.jpg)
-    - Ratio:  overlay.preset heuristic → "3040"|"3545"; fallback ratio_default
+    - Ratio:  overlay.preset heuristic ??"3040"|"3545"; fallback ratio_default
     Safe fallback: on failure, copies input to output when possible.
     """
     in_path, out_path = _resolve_fixed_paths()
