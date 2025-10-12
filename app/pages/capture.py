@@ -532,6 +532,18 @@ class CapturePage(BasePage):
             thumb_path = self._save_preview_snapshot_indexed(int(idx) if idx is not None else 0)
             if not thumb_path:
                 thumb_path = self._save_preview_thumbnail()
+            # 실제 촬영 파일을 지정 경로로 이동/리네임
+            try:
+                move_idx = int(idx) if idx is not None else int(len(self.session.get("shot_paths", [])))
+            except Exception:
+                move_idx = 0
+            try:
+                if path:
+                    new_path = self._move_capture_to_raw(move_idx, path)
+                    if new_path:
+                        path = new_path
+            except Exception:
+                pass
             try:
                 self.session.setdefault("shot_paths", [])
                 self.session.setdefault("shot_thumbs", [])
@@ -586,6 +598,39 @@ class CapturePage(BasePage):
             out = out_dir / name
             ok = pm.save(str(out), "JPG", 90)
             return str(out) if ok else None
+        except Exception:
+            return None
+
+    # 촬영된 실제 파일을 C:\PhotoBox\raw\raw_{i+1:02d}.jpg 로 이동/리네임한다.
+    def _move_capture_to_raw(self, idx: int, src_path: str) -> Optional[str]:
+        try:
+            src = Path(src_path)
+            if not src.exists() or not src.is_file():
+                return None
+            raw_dir = Path(r"C:\PhotoBox\raw")
+            raw_dir.mkdir(parents=True, exist_ok=True)
+            dest = raw_dir / f"raw_{int(idx)+1:02d}.jpg"
+            # 동일 경로면 스킵
+            try:
+                if src.resolve() == dest.resolve():
+                    return str(dest)
+            except Exception:
+                pass
+            # 기존 파일이 있으면 삭제 후 이동
+            try:
+                if dest.exists():
+                    dest.unlink()
+            except Exception:
+                pass
+            try:
+                src.rename(dest)
+            except Exception:
+                # 다른 드라이브 이동 등 실패 시 복사 후 삭제 시도
+                import shutil
+                shutil.copy2(str(src), str(dest))
+                try: src.unlink()
+                except Exception: pass
+            return str(dest)
         except Exception:
             return None
 
