@@ -1,6 +1,6 @@
 ﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
-import os, time, threading
+import os, time, threading, logging
 from pathlib import Path
 from typing import Optional, Dict
 
@@ -20,6 +20,9 @@ from app.ai.guidance import Guidance
 # DLL 경로(필요 시)
 os.add_dll_directory(r"C:\dev\photostudio")
 os.environ.setdefault("CRSDK_DLL", r"C:\dev\photostudio\crsdk_pybridge.dll")
+
+# 로거: 캡처 페이지용 로거
+_log = logging.getLogger("CAP")
 
 # CameraControl은 선택적
 try:
@@ -477,7 +480,10 @@ class CapturePage(BasePage):
     def _tick_seq_countdown(self):
         self._seq_count_left -= 1
         if self._seq_count_left == 1:
-            self._try_af_async()
+            try:
+                self._try_af_async(idx=(getattr(self, "_seq_index", -1) + 1))
+            except Exception:
+                self._try_af_async()
         if self._seq_count_left <= 0:
             next_i = self._seq_index + 1
             self._seq_timer.stop()
@@ -1175,18 +1181,30 @@ class CapturePage(BasePage):
         self._lock_ui_for_capture(True)
         self._overlay_show_during_capture()
         # 첫 샷 카운트다운 시작
+        try:
+            _log.info("[SEQ] start first=5s")
+        except Exception:
+            pass
         self._count_left = 5
         if not self._count_timer.isActive():
             self._count_timer.start()
 
-    def _try_af_async(self):
-        """AF를 비동기로 1회 시도한다."""
+    def _try_af_async(self, idx: Optional[int] = None):
+        """AF를 비동기로 1회 시도한다(로그: [AF] i=.. rc=..)."""
         def _run():
             try:
                 cam = getattr(self.lv, 'cam', None) or getattr(self, '_cam', None) or self.lv
                 if hasattr(cam, 'one_shot_af'):
-                    try: cam.one_shot_af()
-                    except Exception: pass
+                    rc_code = -1
+                    try:
+                        rc = cam.one_shot_af()
+                        rc_code = 0 if (rc is True or rc == 0) else -1
+                    except Exception:
+                        rc_code = -1
+                    try:
+                        _log.info("[AF] i=%s rc=%s", (idx if idx is not None else "?"), rc_code)
+                    except Exception:
+                        pass
             except Exception:
                 pass
         threading.Thread(target=_run, daemon=True).start()
