@@ -196,6 +196,10 @@ class OverlayCanvas(QWidget):
         qp = QPainter()
         if not qp.begin(self):
             return
+        try:
+            qp.setRenderHint(QPainter.Antialiasing, True)
+        except Exception:
+            pass
     
         # 부모 크기 동기화 + 구멍 재계산(안전)
         try:
