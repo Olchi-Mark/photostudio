@@ -549,7 +549,16 @@ class CapturePage(BasePage):
                 self.session.setdefault("shot_thumbs", [])
                 if path: self.session["shot_paths"].append(path)
                 if thumb_path: self.session["shot_thumbs"].append(thumb_path)
-            except Exception: pass
+                # captures/raw_captures 인덱스 갱신
+                eff_i = move_idx
+                arr_cap = self.session.setdefault('captures', ["", "", "", ""])
+                arr_raw = self.session.setdefault('raw_captures', ["", "", "", ""])
+                if 0 <= eff_i < len(arr_cap):
+                    if thumb_path: arr_cap[eff_i] = thumb_path
+                if 0 <= eff_i < len(arr_raw):
+                    if path: arr_raw[eff_i] = path
+            except Exception:
+                pass
             if getattr(self, "_seq_running", False):
                 self._seq_index = int(idx) if idx is not None else (getattr(self, "_seq_index", -1) + 1)
                 if self._seq_index >= 3:
@@ -1110,6 +1119,7 @@ class CapturePage(BasePage):
                 self.session['shot_paths'] = []
             self.session['shot_thumbs'] = []
             self.session['captures'] = ["", "", "", ""]
+            self.session['raw_captures'] = ["", "", "", ""]
             for i in range(len(getattr(self, '_thumb_imgs', []))):
                 try: self._thumb_imgs[i].clear()
                 except Exception: pass
