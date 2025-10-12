@@ -489,6 +489,7 @@ class CapturePage(BasePage):
             ok = False; path = None; err = ""
             try:
                 cam = getattr(self.lv, 'cam', None) or getattr(self, '_cam', None)
+                t_mark = time.time()
                 if cam and hasattr(cam, "shoot_one"):
                     res = cam.shoot_one()
                     if isinstance(res, dict):
@@ -497,6 +498,18 @@ class CapturePage(BasePage):
                         ok = bool(res[0]); path = (res[1] if len(res)>1 else None)
                     elif isinstance(res, bool): ok = res
                     elif isinstance(res, int):  ok = (res == 0)
+                    if ok and not path:
+                        try:
+                            p1 = self._try_fetch_last_saved(cam)
+                        except Exception:
+                            p1 = None
+                        if not p1:
+                            try:
+                                p1 = self._poll_new_jpeg(since=t_mark, timeout_s=3.0)
+                            except Exception:
+                                p1 = None
+                        if p1:
+                            path = p1
                 else:
                     # LiveViewService가 직접 제공하는 경우
                     if hasattr(self.lv, "shoot_one"):
@@ -575,6 +588,61 @@ class CapturePage(BasePage):
             return str(out) if ok else None
         except Exception:
             return None
+
+    # SDK에서 최신 저장 파일을 조회한다. 실패 시 None 반환.
+    def _try_fetch_last_saved(self, cam) -> Optional[str]:
+        try:
+            if hasattr(cam, 'get_last_saved_jpeg'):
+                p = cam.get_last_saved_jpeg()
+                if p:
+                    return p
+        except Exception:
+            pass
+        try:
+            if hasattr(cam, 'download_latest'):
+                p = cam.download_latest()
+                if p:
+                    return p
+        except Exception:
+            pass
+        return None
+
+    # 폴더 감시 폴링으로 신규 JPEG 파일을 찾는다.
+    def _poll_new_jpeg(self, since: float, timeout_s: float = 3.0, interval_s: float = 0.2) -> Optional[str]:
+        t0 = time.time()
+        candidates = [
+            Path(r"C:\PhotoBox\raw"),
+            Path(r"C:\PhotoBox\JPG"),
+            Path(r"C:\PhotoBox"),
+        ]
+        exts = {'.jpg', '.jpeg', '.JPG', '.JPEG'}
+        last_seen: Optional[str] = None
+        while (time.time() - t0) < float(timeout_s):
+            try:
+                for d in candidates:
+                    if not d.exists() or not d.is_dir():
+                        continue
+                    newest_path = None
+                    newest_mtime = -1.0
+                    for p in d.glob('*'):
+                        try:
+                            if p.suffix not in exts:
+                                continue
+                            st = p.stat()
+                            if st.st_mtime >= float(since) and st.st_mtime >= newest_mtime:
+                                newest_mtime = st.st_mtime
+                                newest_path = str(p)
+                        except Exception:
+                            continue
+                    if newest_path:
+                        last_seen = newest_path
+                        break
+                if last_seen:
+                    return last_seen
+            except Exception:
+                pass
+            time.sleep(interval_s)
+        return last_seen
 
     # ── 컨트롤바 스타일/크기 적용 ─────────────────────────────
     def _apply_ctrl_styles(self):
