@@ -74,7 +74,14 @@ class Guidance:
 
 # 공통 함수: 호출부에서 yaw 정규화에 사용한다.
 def normalize_yaw_degrees(raw_yaw_deg: Optional[float], source: str) -> float:
-    """yaw(도)를 소스에 따라 정규화한다. SDK 라이브뷰('sdk')는 좌우 미러이므로 부호를 반전한다."""
+    """yaw(도)를 소스에 따라 정규화한다.
+
+    규칙(화면 픽셀 기준):
+    - SDK liveview 입력은 카메라 프리뷰 특성상 90° CCW + 좌우 미러가 적용된다.
+      따라서 사용자가 화면 기준 오른쪽(+ yaw)으로 고개를 돌리면, 원시 yaw는 부호가 반대로 나온다.
+      이 경우 보이는 대로 안내하기 위해 부호를 반전한다.
+    - 파일(file) 입력은 무회전(미러 없음)이므로 부호 반전을 적용하지 않는다.
+    """
     try:
         if not isinstance(raw_yaw_deg, (int, float)):
             return 0.0
