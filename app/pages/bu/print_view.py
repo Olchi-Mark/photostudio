@@ -768,7 +768,12 @@ class Guidance:
                     yaw = f[k].get("yaw")
                     pitch = f[k].get("pitch")
                     break
-            m["yaw_deg"] = float(yaw) if isinstance(yaw, (int, float)) else 0.0
+            # 파일 스틸 입력이므로 미러 보정 금지('file')
+            try:
+                from app.ai.guidance import normalize_yaw_degrees
+                m["yaw_deg"] = normalize_yaw_degrees(yaw, 'file')
+            except Exception:
+                m["yaw_deg"] = float(yaw) if isinstance(yaw, (int, float)) else 0.0
             m["pitch_deg"] = float(pitch) if isinstance(pitch, (int, float)) else 0.0
             m["has_yaw"] = 1.0 if isinstance(yaw, (int, float)) else 0.0
             m["has_pitch"] = 1.0 if isinstance(pitch, (int, float)) else 0.0

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Dict, Any, Tuple, Optional
+from app.ai.guidance import normalize_yaw_degrees
 from math import atan2, degrees, fabs
 from PySide6.QtGui import QImage
 
@@ -46,6 +47,18 @@ class Guidance:
         self._ema: Dict[str, float] = {}
         self._last_badges: Dict[str, str] = {"primary": "", "left": "", "right": ""}
         self._gate: Dict[str, bool] = {"shoulder": False, "eye": False, "yaw": False, "pitch": False}
+        # 입력 소스: 'sdk' | 'file' (yaw 미러 보정)
+        self._src: str = 'file'
+
+    # 입력 소스를 설정한다.
+    def set_input_source(self, source: str) -> None:
+        """yaw 정규화를 위한 입력 소스를 설정한다('sdk' 또는 'file')."""
+        try:
+            s = str(source).strip().lower()
+            if s in ('sdk', 'file'):
+                self._src = s
+        except Exception:
+            pass
         self._green_since_ms: int = 0  # OK 유지 시작 시각(ms)
 
     def reset(self):
@@ -158,7 +171,8 @@ class Guidance:
                     yaw = f[k].get("yaw")
                     pitch = f[k].get("pitch")
                     break
-            m["yaw_deg"] = float(yaw) if isinstance(yaw, (int, float)) else 0.0
+            # Yaw 정규화 적용
+            m["yaw_deg"] = normalize_yaw_degrees(yaw, getattr(self, '_src', 'file'))
             m["pitch_deg"] = float(pitch) if isinstance(pitch, (int, float)) else 0.0
             m["has_yaw"] = 1.0 if isinstance(yaw, (int, float)) else 0.0
             m["has_pitch"] = 1.0 if isinstance(pitch, (int, float)) else 0.0

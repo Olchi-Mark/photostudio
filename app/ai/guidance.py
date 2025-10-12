@@ -72,6 +72,19 @@ class Guidance:
         except Exception:
             return 0.0
 
+# 공통 함수: 호출부에서 yaw 정규화에 사용한다.
+def normalize_yaw_degrees(raw_yaw_deg: Optional[float], source: str) -> float:
+    """yaw(도)를 소스에 따라 정규화한다. SDK 라이브뷰('sdk')는 좌우 미러이므로 부호를 반전한다."""
+    try:
+        if not isinstance(raw_yaw_deg, (int, float)):
+            return 0.0
+        y = float(raw_yaw_deg)
+        if str(source).strip().lower() == 'sdk':
+            y = -y
+        return y
+    except Exception:
+        return 0.0
+
     def reset(self):
         self._last_ts = 0
         self._ema.clear()
