@@ -19,6 +19,11 @@ from PySide6.QtGui import QColor, QPainter, QPixmap, QPen
 
 from app.ui.base_page import BasePage
 
+# 환경 변수 스위치: 문자열 값을 on/off로 판별한다.
+def _env_on(name: str, default: str = "0") -> bool:
+    v = str(os.getenv(name, default)).strip().lower()
+    return v in ("1", "true", "on", "yes")
+
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 #──────── 디렉토리/로그/상태 ────────
@@ -71,12 +76,11 @@ try:
     if os.getenv("PV_EXHOOK", "1") == "1":
         _install_global_exhook()
 except Exception:
-# 전역 훅 환경변수 가드: 기본 OFF("0"), "1"이면 설치
+# 전역 예외 훅: 기본 OFF. PV_EXHOOK가 참값("1/true/on/yes")일 때만 설치한다.
 try:
-    if os.getenv("PV_EXHOOK", "0") == "1":
+    if _env_on("PV_EXHOOK", "0"):
         _install_global_exhook()
 except Exception:
-    # 설치 실패는 무시
     pass
 atexit.register(lambda: _state_update(phase="exit"))
 
