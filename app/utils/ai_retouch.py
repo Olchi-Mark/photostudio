@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 # app/utils/ai_retouch.py — ID/Resume photo AI retouch pipeline (Tasks)
 # Spec: (3,4)=30×40 → Head 52–58%H, Top 6–10%H
 #       (7,9)=35×45 → Head 73–78%H, Top 6–8%H
