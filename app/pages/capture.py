@@ -523,6 +523,12 @@ class CapturePage(BasePage):
                         ok = (rc == 0)
                     else:
                         err = "shoot api not available"
+                # 샷 결과 로깅
+                try:
+                    rc_code = 0 if ok else -1
+                    _log.info("[SHOT] i=%s rc=%s", (i if i is not None else "?"), rc_code)
+                except Exception:
+                    pass
             except Exception as e:
                 err = str(e)
             def _done(): self._on_shoot_done(ok, path, err, i)
