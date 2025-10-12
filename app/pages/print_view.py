@@ -76,8 +76,8 @@ try:
     if os.getenv("PV_EXHOOK", "1") == "1":
         _install_global_exhook()
 except Exception:
-# 전역 예외 훅: 기본 OFF. PV_EXHOOK가 참값("1/true/on/yes")일 때만 설치 + 종료 훅 등록.
-if _env_on("PV_EXHOOK", "0"):
+# 전역 예외 훅: 기본끔(0) → 1/on/true/yes면 켬
+if _env_on("PV_EXHOOK", "0"):   # 기본끔(0) → 1/on/true/yes면켬
     try:
         _install_global_exhook()
         atexit.register(lambda: _state_update(phase="exit"))
