@@ -2,7 +2,7 @@
 # LiveViewService: Sony CRSDK live‑view → QImage (emit via Qt signal)
 from __future__ import annotations
 
-import os, ctypes as C, threading, time
+import os, ctypes as C, threading, time, logging
 from typing import Optional, Callable
 
 from PySide6.QtCore import QObject, Signal, Qt, QThread
@@ -40,20 +40,54 @@ WARMUP_MS      = 90
 POLL_MS        = 50
 POLL_TOTAL_MS  = 3000
 
-def _log(s: str) -> None: print(f"[LV] {s}")
+# 로거: CODING.md 규칙에 따라 logging을 사용한다.
+_logger = logging.getLogger("LV")
+
+def _log(msg: str) -> None:
+    """과거 호출 호환을 위한 단순 로그 래퍼."""
+    try:
+        _logger.info("[LV] %s", msg)
+    except Exception:
+        pass
+
+def _log_info(msg: str) -> None:
+    """정보 수준 로그를 기록한다."""
+    try:
+        _logger.info("[LV] %s", msg)
+    except Exception:
+        pass
+
+def _logf_info(fmt: str, *args) -> None:
+    """서식 문자열로 정보 로그를 기록한다."""
+    try:
+        _logger.info("[LV] " + fmt, *args)
+    except Exception:
+        pass
+
+def _logf_debug(fmt: str, *args) -> None:
+    """서식 문자열로 디버그 로그를 기록한다."""
+    try:
+        _logger.debug("[LV] " + fmt, *args)
+    except Exception:
+        pass
 
 class _LiveViewThread(QThread):
+    """백그라운드에서 CRSDK 라이브뷰를 처리한다."""
     frameReady    = Signal(QImage)
     statusChanged = Signal(str)
 
     def __init__(self, ms_sdk: int, dll_debug: bool):
+        """폴링 주기와 디버그 옵션으로 스레드를 초기화한다."""
         super().__init__()
         self.ms_sdk = ms_sdk
         self._stop = threading.Event()
         self._h = C.c_void_p()
         self._dll_debug = dll_debug
+        self._last_w = 0
+        self._last_h = 0
 
     def stop_async(self) -> None:
+        """중단 플래그를 설정하고 안전하게 인터럽트를 건다."""
         self._stop.set()
         try:
             self.requestInterruption()
@@ -61,24 +95,37 @@ class _LiveViewThread(QThread):
             pass
 
     def run(self):
+        """CRSDK 연결→웨이크→활성화→폴링/프레임 송신을 수행한다."""
         try:
             try: _d.crsdk_set_debug(1 if self._dll_debug else 0)
             except Exception: pass
 
             if _d.crsdk_init() != 0:
-                _log("init failed"); return
+                _log_info("init failed"); return
 
             h = C.c_void_p()
             rc = _d.crsdk_connect_first(C.byref(h))
-            _log(f"dll={_DLL_PATH}")
-            _log(f"connect rc={rc} handle=0x{h.value or 0:X}")
+            _logf_info("dll=%s", _DLL_PATH)
+            _logf_info("connect rc=%s handle=0x%X", rc, (h.value or 0))
             if rc != 0 or not h.value:
                 _d.crsdk_release(); return
             self._h = h
 
+            # 연결 직후 웨이크(원샷 AF) 시도
+            try:
+                fn_af = getattr(_d, "crsdk_one_shot_af", None)
+                if callable(fn_af):
+                    try:
+                        rc_af = int(fn_af(self._h))
+                    except Exception:
+                        rc_af = -1
+                    _logf_info("wake rc=%s", rc_af)
+            except Exception:
+                pass
+
             t_enable = time.time()
             rc_en = _d.crsdk_enable_liveview(self._h, 1)
-            _log(f"enable rc={rc_en}")
+            _logf_info("enable rc=%s", rc_en)
             # Allow buffers to warm up before pulling info
             time.sleep(WARMUP_MS / 1000.0)
             self.statusChanged.emit("sdk")
@@ -86,49 +133,162 @@ class _LiveViewThread(QThread):
             need = C.c_uint(0)
             buf = None
             last_kick = 0.0
+            last_frame_ts = time.time()
             gap = self.ms_sdk / 1000.0
 
-            # Phase 1: poll get_lv_info up to POLL_TOTAL_MS
+            # Phase 1: get_lv_info 폴링 (최대 3000ms, 50ms 간격)
             t0 = time.time()
+            last_info_log = 0.0
             while buf is None and not self._stop.is_set() and ((time.time() - t0) * 1000.0) < POLL_TOTAL_MS:
                 if _d.crsdk_get_lv_info(self._h, C.byref(need)) == 0:
                     t_ms = int((time.time() - t_enable) * 1000.0)
-                    # width/height are not available at info stage; log 0
-                    _log(f"info t={t_ms} need={need.value} w=0 h=0")
+                    # info 단계: w/h는 마지막 알려진 값으로 기록 (디버그는 매틱, info는 초당 1회)
+                    now = time.time()
+                    if now - last_info_log >= 1.0:
+                        _logf_info("info t=%s need=%s w=%s h=%s", t_ms, need.value, self._last_w, self._last_h)
+                        last_info_log = now
+                    else:
+                        _logf_debug("info t=%s need=%s w=%s h=%s", t_ms, need.value, self._last_w, self._last_h)
                     if need.value > 0:
+                        # prime read: need>0 이고 (w==0 or h==0)이면 1회 읽고 info 재조회
+                        if self._last_w == 0 or self._last_h == 0:
+                            pbuf = (C.c_ubyte * int(need.value))()
+                            used_p = C.c_uint(0)
+                            try:
+                                rc_prime = _d.crsdk_get_lv_image(self._h, C.cast(pbuf, C.c_void_p), C.c_uint(int(need.value)), C.byref(used_p))
+                            except Exception:
+                                rc_prime = -1
+                            _logf_info("prime rc=%s", rc_prime)
+                            # 가능한 경우 크기 업데이트
+                            if rc_prime == 0 and used_p.value:
+                                try:
+                                    data_p = bytes(memoryview(pbuf)[:used_p.value])
+                                    img_p = QImage.fromData(data_p, "JPG")
+                                    if not img_p.isNull():
+                                        self._last_w, self._last_h = img_p.width(), img_p.height()
+                                except Exception:
+                                    pass
+                            time.sleep(POLL_MS / 1000.0)
+                            continue
                         buf = (C.c_ubyte * int(need.value))()
-                        _log(f"lv_info need={need.value}")
+                        _logf_info("lv_info need=%s", need.value)
                         break
                 time.sleep(POLL_MS / 1000.0)
 
-            # Phase 2: if still need==0, call lv_smoke() once, then re-poll up to POLL_TOTAL_MS
+            # Phase 2: 여전히 need==0이면 smoke 1회 후 재폴링
             if buf is None and not self._stop.is_set():
                 # Guard: skip smoke if symbol missing
                 if getattr(_d, "crsdk_lv_smoke", None) is None:
-                    _log("smoke skip (symbol missing)")
+                    _log_info("smoke skip (symbol missing)")
                 else:
                     try:
                         nbytes = C.c_uint(0)
                         rc_smoke = _d.crsdk_lv_smoke(self._h, None, C.byref(nbytes))
-                        _log(f"smoke rc={rc_smoke}")
+                        _logf_info("smoke rc=%s", rc_smoke)
                     except Exception:
-                        _log("smoke rc=ERR")
+                        _log_info("smoke rc=ERR")
                 t1 = time.time()
+                last_info_log = 0.0
                 while buf is None and not self._stop.is_set() and ((time.time() - t1) * 1000.0) < POLL_TOTAL_MS:
                     if _d.crsdk_get_lv_info(self._h, C.byref(need)) == 0:
                         t_ms = int((time.time() - t_enable) * 1000.0)
-                        _log(f"info t={t_ms} need={need.value} w=0 h=0")
+                        now = time.time()
+                        if now - last_info_log >= 1.0:
+                            _logf_info("info t=%s need=%s w=%s h=%s", t_ms, need.value, self._last_w, self._last_h)
+                            last_info_log = now
+                        else:
+                            _logf_debug("info t=%s need=%s w=%s h=%s", t_ms, need.value, self._last_w, self._last_h)
                         if need.value > 0:
+                            if self._last_w == 0 or self._last_h == 0:
+                                pbuf = (C.c_ubyte * int(need.value))()
+                                used_p = C.c_uint(0)
+                                try:
+                                    rc_prime = _d.crsdk_get_lv_image(self._h, C.cast(pbuf, C.c_void_p), C.c_uint(int(need.value)), C.byref(used_p))
+                                except Exception:
+                                    rc_prime = -1
+                                _logf_info("prime rc=%s", rc_prime)
+                                if rc_prime == 0 and used_p.value:
+                                    try:
+                                        data_p = bytes(memoryview(pbuf)[:used_p.value])
+                                        img_p = QImage.fromData(data_p, "JPG")
+                                        if not img_p.isNull():
+                                            self._last_w, self._last_h = img_p.width(), img_p.height()
+                                    except Exception:
+                                        pass
+                                time.sleep(POLL_MS / 1000.0)
+                                continue
                             buf = (C.c_ubyte * int(need.value))()
-                            _log(f"lv_info need={need.value}")
+                            _logf_info("lv_info need=%s", need.value)
+                            break
+                    time.sleep(POLL_MS / 1000.0)
+
+            # Phase 3: 그래도 실패 시 재시작 시퀀스(0→1) 후 마지막 재폴링
+            if buf is None and not self._stop.is_set():
+                try:
+                    _d.crsdk_enable_liveview(self._h, 0)
+                except Exception:
+                    pass
+                time.sleep(0.120)
+                try:
+                    _d.crsdk_enable_liveview(self._h, 1)
+                except Exception:
+                    pass
+                time.sleep(0.090)
+                _log_info("restart 0→1")
+                t2 = time.time()
+                last_info_log = 0.0
+                while buf is None and not self._stop.is_set() and ((time.time() - t2) * 1000.0) < POLL_TOTAL_MS:
+                    if _d.crsdk_get_lv_info(self._h, C.byref(need)) == 0:
+                        t_ms = int((time.time() - t_enable) * 1000.0)
+                        now = time.time()
+                        if now - last_info_log >= 1.0:
+                            _logf_info("info t=%s need=%s w=%s h=%s", t_ms, need.value, self._last_w, self._last_h)
+                            last_info_log = now
+                        else:
+                            _logf_debug("info t=%s need=%s w=%s h=%s", t_ms, need.value, self._last_w, self._last_h)
+                        if need.value > 0:
+                            if self._last_w == 0 or self._last_h == 0:
+                                pbuf = (C.c_ubyte * int(need.value))()
+                                used_p = C.c_uint(0)
+                                try:
+                                    rc_prime = _d.crsdk_get_lv_image(self._h, C.cast(pbuf, C.c_void_p), C.c_uint(int(need.value)), C.byref(used_p))
+                                except Exception:
+                                    rc_prime = -1
+                                _logf_info("prime rc=%s", rc_prime)
+                                if rc_prime == 0 and used_p.value:
+                                    try:
+                                        data_p = bytes(memoryview(pbuf)[:used_p.value])
+                                        img_p = QImage.fromData(data_p, "JPG")
+                                        if not img_p.isNull():
+                                            self._last_w, self._last_h = img_p.width(), img_p.height()
+                                    except Exception:
+                                        pass
+                                time.sleep(POLL_MS / 1000.0)
+                                continue
+                            buf = (C.c_ubyte * int(need.value))()
+                            _logf_info("lv_info need=%s", need.value)
                             break
                     time.sleep(POLL_MS / 1000.0)
 
             while not self._stop.is_set():
+                # keepalive: 마지막 프레임 이후 ≥1000ms 시 info 재조회로 1회 복구
+                _now_ts = time.time()
+                if (_now_ts - last_frame_ts) >= 1.0:
+                    _need_k = C.c_uint(0)
+                    try:
+                        if _d.crsdk_get_lv_info(self._h, C.byref(_need_k)) == 0:
+                            _log_info("keepalive recover")
+                            if buf is None and _need_k.value > 0:
+                                buf = (C.c_ubyte * int(_need_k.value))()
+                                _logf_info("lv_info need=%s", _need_k.value)
+                    except Exception:
+                        pass
+                    # 1회 복구 후 타이머 리셋
+                    last_frame_ts = time.time()
                 if buf is None:
                     if _d.crsdk_get_lv_info(self._h, C.byref(need)) == 0 and need.value > 0:
                         buf = (C.c_ubyte * int(need.value))()
-                        _log(f"lv_info need={need.value}")
+                        _logf_info("lv_info need=%s", need.value)
                     else:
                         # need==0 recovery: nudge LV periodically and wait a short while
                         now = time.time()
@@ -157,11 +317,26 @@ class _LiveViewThread(QThread):
                         except Exception:
                             img = QImage()
                     if not img.isNull():
+                        # 마지막 알려진 w/h 갱신
+                        try:
+                            self._last_w, self._last_h = img.width(), img.height()
+                        except Exception:
+                            pass
+                        # 마지막 프레임 시각 갱신
+                        last_frame_ts = time.time()
                         if not hasattr(self, "_started_logged"):
                             t_started_ms = int((time.time() - t_enable) * 1000.0)
-                            _log(f"started in {t_started_ms}")
+                            _logf_info("started in %s", t_started_ms)
                             self._started_logged = True
                         self.frameReady.emit(img)
+                # 주기적 keepalive: 비차단으로 주기적으로 1을 재설정
+                now = time.time()
+                if now - last_kick > 2.0:
+                    try:
+                        _d.crsdk_enable_liveview(self._h, 1)
+                    except Exception:
+                        pass
+                    last_kick = now
                 time.sleep(gap)
         finally:
             try:
@@ -176,6 +351,7 @@ class _LiveViewThread(QThread):
                 self._h = C.c_void_p()
             self.statusChanged.emit("off")
 
+# 라이브뷰를 비동기로 제공하는 서비스이다.
 class LiveViewService(QObject):
     frameReady    = Signal(QImage)   # 프레임(QImage)
     statusChanged = Signal(str)      # 'sdk' | 'off'
@@ -192,11 +368,13 @@ class LiveViewService(QObject):
         self._sig_worker_connected = False
 
     # 외부 설정
+    # 라이브뷰 폴링 주기 등 설정을 적용한다.
     def configure(self, _lv_dir: str, ms_sdk: int, _ms_file: int, _fallback_ms: int = 3000) -> None:
         try: self.ms_sdk = max(16, int(ms_sdk))
         except Exception: self.ms_sdk = 33
 
     # 비동기 시작 (즉시 반환)
+    # 라이브뷰를 시작하고 QImage 콜백을 연결한다.
     def start(self, on_qimage: Callable[[QImage], None],
               serial: Optional[str] = None, dll_debug: bool = False) -> bool:
         self.stop()
@@ -231,6 +409,7 @@ class LiveViewService(QObject):
         self._th.start()
         return True
 
+    # 라이브뷰를 중단하고 연결된 신호를 해제한다.
     def stop(self) -> None:
         # Request stop but never block the UI thread waiting
         self._stop.set()
