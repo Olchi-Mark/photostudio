@@ -213,7 +213,17 @@ class CapturePage(BasePage):
         self.delay_group = QButtonGroup(self)
         for i, b in ((3,self.delay3),(5,self.delay5),(7,self.delay7)): self.delay_group.addButton(b, i); hb.addWidget(b, 0)
         self.delay_group.setExclusive(True); self.delay3.setChecked(True)
-        self.delay_group.idClicked.connect(self._on_delay_changed)
+        # 3/5/7초 버튼은 비활성/비표시 처리
+        try:
+            self.delay_group.idClicked.disconnect(self._on_delay_changed)
+        except Exception:
+            pass
+        for b in (self.delay3, self.delay5, self.delay7):
+            try:
+                b.setEnabled(False)
+                b.setVisible(False)
+            except Exception:
+                pass
 
         self.btn_capture = QPushButton("촬영", self.ctrl); self.btn_capture.setObjectName("BtnCapture")
         self.btn_retake  = QPushButton("재촬영", self.ctrl); self.btn_retake.setObjectName("BtnRetake")
@@ -229,6 +239,13 @@ class CapturePage(BasePage):
         self._count_timer = QTimer(self); self._count_timer.setInterval(1000)
         self._count_timer.timeout.connect(self._tick_countdown)
         self._count_left = 0; self._capturing = False
+        # 자동 연사 제어 상태
+        self._seq_running = False
+        self._seq_index = -1
+        self._ready_since = None
+        self._seq_timer = QTimer(self); self._seq_timer.setInterval(1000)
+        self._seq_timer.timeout.connect(self._tick_seq_countdown)
+        self._seq_count_left = 0
 
         self._lv_status_hooked = False   # statusChanged 연결 플래그
         self._connecting = False         # 연결 진행 중 플래그
@@ -413,30 +430,32 @@ class CapturePage(BasePage):
     # ── 촬영 트리거/카운트다운 ───────────────────────────────
     def _on_capture_clicked(self):
         if self._capturing: return
-        v = int(self.session.get("delay_sec", 3) or 3)
-        if v not in (3,5,7): v = 3
-        self.session["delay_sec"] = v
         self._clear_captures()
         self._lock_ui_for_capture(True)
         self._overlay_show_during_capture()
-        self._start_countdown(v)
+        self._start_countdown(5)
 
     def _on_retake_clicked(self):
         if getattr(self, "_count_timer", None) and self._count_timer.isActive(): self._count_timer.stop()
         self._count_left = 0; self._capturing = False
         self.btn_capture.setEnabled(True)
-        for b in (self.delay3, self.delay5, self.delay7): b.setEnabled(True)
+        for b in (self.delay3, self.delay5, self.delay7):
+            try: b.setEnabled(False)
+            except Exception: pass
         self._overlay_hide()
         self.set_next_enabled(False); self.set_next_mode("disabled")
         self.set_prev_mode("enabled"); self.set_prev_enabled(True)
         self._shot_index = 0; self._clear_captures()
+        # 자동 연사 상태 리셋
+        self._seq_running = False; self._seq_index = -1; self._ready_since = None
+        if self._seq_timer.isActive(): self._seq_timer.stop()
 
     def _lock_ui_for_capture(self, on: bool):
         self._capturing = bool(on)
         self.set_prev_mode("disabled"); self.set_prev_enabled(False)
         self.set_next_mode("disabled"); self.set_next_enabled(False)
         for b in (self.delay3, self.delay5, self.delay7):
-            try: b.setEnabled(not on)
+            try: b.setEnabled(False)
             except Exception: pass
         try: self.btn_capture.setEnabled(not on)
         except Exception: pass
@@ -446,10 +465,25 @@ class CapturePage(BasePage):
 
     def _tick_countdown(self):
         self._count_left -= 1
+        try:
+            if self._count_left == 3:
+                self._try_af_async()
+        except Exception:
+            pass
         if self._count_left > 0: return
-        self._count_timer.stop(); self._invoke_shoot()
+        self._count_timer.stop(); self._invoke_shoot(i=0)
 
-    def _invoke_shoot(self):
+    # 자동 연사용 1초 tick: 이후 샷들 3초 간격, 각 1초 전 AF
+    def _tick_seq_countdown(self):
+        self._seq_count_left -= 1
+        if self._seq_count_left == 1:
+            self._try_af_async()
+        if self._seq_count_left <= 0:
+            next_i = self._seq_index + 1
+            self._seq_timer.stop()
+            self._invoke_shoot(i=next_i)
+
+    def _invoke_shoot(self, i: Optional[int]=None):
         # 기존 캡처 파이프라인 유지
         def _work():
             ok = False; path = None; err = ""
@@ -472,14 +506,15 @@ class CapturePage(BasePage):
                         err = "shoot api not available"
             except Exception as e:
                 err = str(e)
-            def _done(): self._on_shoot_done(ok, path, err)
+            def _done(): self._on_shoot_done(ok, path, err, i)
             QTimer.singleShot(0, _done)
         threading.Thread(target=_work, daemon=True).start()
 
-    def _on_shoot_done(self, ok: bool, path: Optional[str], err: str=""):
+    def _on_shoot_done(self, ok: bool, path: Optional[str], err: str="", idx: Optional[int]=None):
         if ok:
-            try: self._stop_camera()
-            except Exception: pass
+            if not getattr(self, "_seq_running", False):
+                try: self._stop_camera()
+                except Exception: pass
             thumb_path = self._save_preview_thumbnail()
             try:
                 self.session.setdefault("shot_paths", [])
@@ -487,7 +522,17 @@ class CapturePage(BasePage):
                 if path: self.session["shot_paths"].append(path)
                 if thumb_path: self.session["shot_thumbs"].append(thumb_path)
             except Exception: pass
-            self.end_capture(True)
+            if getattr(self, "_seq_running", False):
+                self._seq_index = int(idx) if idx is not None else (getattr(self, "_seq_index", -1) + 1)
+                if self._seq_index >= 3:
+                    self._seq_running = False
+                    self.end_capture(True)
+                else:
+                    self._seq_count_left = 3
+                    if not self._seq_timer.isActive():
+                        self._seq_timer.start()
+            else:
+                self.end_capture(True)
         else:
             try:
                 if hasattr(self, "overlay") and hasattr(self.overlay, "update_badges"):
@@ -496,7 +541,9 @@ class CapturePage(BasePage):
             except Exception: pass
             self._overlay_hide()
             self.btn_capture.setText("재시도"); self.btn_capture.setEnabled(True)
-            for b in (self.delay3, self.delay5, self.delay7): b.setEnabled(True)
+            for b in (self.delay3, self.delay5, self.delay7):
+                try: b.setEnabled(False)
+                except Exception: pass
             self.set_prev_mode("enabled"); self.set_prev_enabled(True)
             self.set_next_mode("disabled"); self.set_next_enabled(False)
             self._capturing = False
@@ -710,6 +757,19 @@ class CapturePage(BasePage):
 
             if not pix.isNull():
                 self.preview_label.setPixmap(pix)
+            # 자동 연사 조건 확인(캡처 중 아닐 때도 가이던스 평가)
+            try:
+                if not getattr(self, "_capturing", False) and hasattr(self, 'guide'):
+                    ts = int(time.time() * 1000)
+                    _, _, _metrics0 = self.guide.update(
+                        pix.toImage() if isinstance(pix, QPixmap) else img,
+                        self.get_ratio(), ts,
+                        getattr(self, 'face', None), getattr(self, 'pose', None)
+                    )
+                    try: self._check_auto_sequence(_metrics0)
+                    except Exception: pass
+            except Exception:
+                pass
 
             # 가이던스/오버레이
             if getattr(self, "_capturing", False) and hasattr(self, 'guide'):
@@ -944,6 +1004,96 @@ class CapturePage(BasePage):
         if mode == 'sdk':
             try: self._prep_af_awb()
             except Exception: pass
+
+    # 가이던스 연속 만족 감지 및 자동 연사 시작
+    def _check_auto_sequence(self, metrics: dict):
+        """metrics.ready가 0.8초 연속 True면 자동 4연사를 시작한다."""
+        if getattr(self, "_seq_running", False) or getattr(self, "_capturing", False):
+            return
+        ready = False
+        try:
+            ready = bool(metrics.get("ready", False))
+        except Exception:
+            ready = False
+        now = time.time()
+        if ready:
+            if getattr(self, "_ready_since", None) is None:
+                self._ready_since = now
+            elif (now - float(self._ready_since)) >= 0.8:
+                self._start_auto_sequence()
+        else:
+            self._ready_since = None
+
+    def _start_auto_sequence(self):
+        """자동 4연사 시퀀스를 시작한다(첫샷 5초, 이후 3초 간격)."""
+        if getattr(self, "_seq_running", False):
+            return
+        self._seq_running = True
+        self._seq_index = -1
+        self._clear_captures()
+        self._lock_ui_for_capture(True)
+        self._overlay_show_during_capture()
+        # 첫 샷 카운트다운 시작
+        self._count_left = 5
+        if not self._count_timer.isActive():
+            self._count_timer.start()
+
+    def _try_af_async(self):
+        """AF를 비동기로 1회 시도한다."""
+        def _run():
+            try:
+                cam = getattr(self.lv, 'cam', None) or getattr(self, '_cam', None) or self.lv
+                if hasattr(cam, 'one_shot_af'):
+                    try: cam.one_shot_af()
+                    except Exception: pass
+            except Exception:
+                pass
+        threading.Thread(target=_run, daemon=True).start()
+
+    # 가이던스 연속 만족 감지 및 자동 연사 시작
+    def _check_auto_sequence(self, metrics: dict):
+        """metrics.ready가 0.8초 연속 True면 자동 4연사를 시작한다."""
+        if getattr(self, "_seq_running", False) or getattr(self, "_capturing", False):
+            return
+        ready = False
+        try:
+            ready = bool(metrics.get("ready", False))
+        except Exception:
+            ready = False
+        now = time.time()
+        if ready:
+            if getattr(self, "_ready_since", None) is None:
+                self._ready_since = now
+            elif (now - float(self._ready_since)) >= 0.8:
+                self._start_auto_sequence()
+        else:
+            self._ready_since = None
+
+    def _start_auto_sequence(self):
+        """자동 4연사 시퀀스를 시작한다(첫샷 5초, 이후 3초 간격)."""
+        if getattr(self, "_seq_running", False):
+            return
+        self._seq_running = True
+        self._seq_index = -1
+        self._clear_captures()
+        self._lock_ui_for_capture(True)
+        self._overlay_show_during_capture()
+        # 첫 샷: 5초 카운트다운, T-3에 AF
+        self._count_left = 5
+        if not self._count_timer.isActive():
+            self._count_timer.start()
+
+    def _try_af_async(self):
+        """AF를 비동기로 1회 시도한다."""
+        def _run():
+            try:
+                cam = getattr(self.lv, 'cam', None) or getattr(self, '_cam', None) or self.lv
+                if hasattr(cam, 'one_shot_af'):
+                    try: cam.one_shot_af()
+                    except Exception: pass
+            except Exception:
+                pass
+        threading.Thread(target=_run, daemon=True).start()
 
     # ── 보조: 초기 AF/AWB ────────────────────────────────────
     def _prep_af_awb(self, callback=None):
