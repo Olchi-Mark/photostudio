@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 ?ъ쭊 ?꾩껜 ?뚯쟾(v2) + ?닿묠 ?섑룊 蹂댁젙 + ?뺤닔由??깅걹 鍮④컙???쒖떆瑜??섑뻾?쒕떎.
@@ -111,9 +111,9 @@ def _edge_penalty(bgr: np.ndarray, x_center: int, y_cand: int) -> float:
     if idxs.size == 0:
         return 0.0
     y_edge = int(idxs[0])
-    # ?꾨낫媛 ?먯?蹂대떎 吏?섏튂寃??????묒? y)硫??ш쾶 ?⑤꼸??    if y_cand < y_edge - 2:
+    if y_cand < y_edge - 2:
         return float((y_edge - y_cand) * 2.0)
-    # ?꾨낫媛 ?먯?蹂대떎 ?덈Т ?꾨옒硫??쏀븳 ?⑤꼸??    if y_cand > y_edge + 20:
+    if y_cand > y_edge + 20:
         return float((y_cand - (y_edge + 20)) * 0.2)
     return 0.0
 
@@ -136,7 +136,7 @@ def _estimate_crown_chin(bgr: np.ndarray, *, ratio: object | None = None) -> Tup
         for a in alphas:
             y_c = int(np.clip((p10.y + a * (p10.y - p152.y)) * H, 0, H - 1))
             head_pct = (y_chin - y_c) / max(1.0, float(H))
-            # ?ㅼ퐫?? 紐낆꽭 以묒떖怨쇱쓽 嫄곕━ + ?ｌ? ?⑤꼸??            spec_cost = abs(head_pct - head_mid) * 100.0
+            spec_cost = abs(head_pct - head_mid) * 100.0
             edge_cost = _edge_penalty(bgr, x_eye, y_c)
             score = spec_cost + edge_cost
             if score < best_score:
@@ -170,7 +170,7 @@ def _eye_roll_angle_deg(bgr: np.ndarray) -> float:
         return 0.0
     L, R = lms[33], lms[263]
     dx = (R.x - L.x); dy = (R.y - L.y)
-    logger.info("[roll] dx=%.5f dy=%.5f (y???꾨옒濡?利앷?)", dx, dy)
+    logger.info("[roll] dx=%.5f dy=%.5f", dx, dy)
     if abs(dx) < 1e-6:
         logger.info("[roll] dx?? -> 0.0 deg")
         return 0.0
@@ -226,7 +226,7 @@ def _rotate_v1(bgr: np.ndarray) -> np.ndarray:
     H, W = bgr.shape[:2]
     lms = _mp_face_mesh(bgr)
     if not lms:
-        logger.info("[v1] face landmarks ?놁쓬 -> ?뚯쟾 ?ㅽ궢")
+        logger.info("[v1] face landmarks none -> rotate skip")
         return bgr
     L, R = lms[33], lms[263]
     dx, dy = (R.x - L.x), (R.y - L.y)
@@ -236,7 +236,7 @@ def _rotate_v1(bgr: np.ndarray) -> np.ndarray:
     ang_raw = -math.degrees(math.atan2(dy, dx))
     ang = max(-15.0, min(15.0, ang_raw))
     if abs(ang) < 0.8:
-        logger.info("[v1] |angle|<0.8째 -> ?ㅽ궢")
+        logger.info("[v1] |angle|<0.8° -> skip")
         return bgr
 
     # ?뚯쟾 以묒떖: ???덉쓽 以묒젏
@@ -258,7 +258,7 @@ def _rotate_v1(bgr: np.ndarray) -> np.ndarray:
     M[0,2] = float(M[0,2] + trans_dx)
 
     rot = cv2.warpAffine(bgr, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
-    logger.info("[v1] rotate(sign-flip) %.2f째 center=(%d,%d) trans_dx=%.1f bbox_cx=%.1f", -ang, cx, cy, trans_dx, desired_cx)
+    logger.info("[v1] rotate(sign-flip) %.2f° center=(%d,%d) trans_dx=%.1f bbox_cx=%.1f", -ang, cx, cy, trans_dx, desired_cx)
     return rot
 
 
@@ -274,7 +274,7 @@ def _level_shoulders(bgr: np.ndarray) -> np.ndarray:
     H, W = bgr.shape[:2]
     pl = _mp_pose(bgr)
     if not pl:
-        logger.info("[shoulder] pose ?놁쓬 -> skip")
+        logger.info("[shoulder] pose none -> skip")
         return bgr
     L, R = pl[11], pl[12]
     xL, yL = L.x * W, L.y * H
@@ -453,7 +453,7 @@ def process_file(
     try:
         bgr = _load_image(in_path)
         if bgr is None:
-            logger.error("[retouch] 濡쒕뱶 ?ㅽ뙣: %s", in_path)
+            logger.error("[retouch] 로드 실패: %s", in_path)
             return False
         H, W = bgr.shape[:2]
         # v1 ?ㅽ????뚯쟾?쇰줈 蹂寃???以묒떖, 짹15째, 0.8째 ?ㅽ궢, ?깅걹 x ?뺣젹)
@@ -470,7 +470,7 @@ def process_file(
         ok = save_jpg_bgr(out, out_path, 100)
         return bool(ok)
     except Exception as e:
-        logger.error("[retouch] 泥섎━ ?ㅽ뙣: %s", e)
+        logger.error("[retouch] 예외 발생: %s", e)
         return False
 
 

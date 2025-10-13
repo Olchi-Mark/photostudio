@@ -582,46 +582,46 @@ class _AIWorker(QObject):
 
 
 #──────── Photoshop 종료 유틸 ────────
+# Photoshop 프로세스가 실행 중인지 확인한다.
 def _ps_running() -> bool:
     if os.name != "nt":
         return False
     try:
         p = subprocess.run(
-            ["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]sklist", "/FI", "IMAGENAME eq Photoshop.exe", "/FO", "CSV", "/NH"],
+            ["tasklist", "/FI", "IMAGENAME eq Photoshop.exe", "/FO", "CSV", "/NH"],
             capture_output=True, text=True, creationflags=CREATE_NO_WINDOW
         )
         return "Photoshop.exe" in (p.stdout or "")
     except Exception:
         return False
 
+# Photoshop에 창 닫기를 요청하고, 유예 후 필요시 강제 종료한다.
 def _ps_close_async(grace_ms: int = 1500, force: bool = True) -> None:
     """파이프라인 완료 시 포토샵 종료. 먼저 정상 종료 시도, 남아있으면 강제 종료."""
     if os.name != "nt": return
     def _run():
         try:
-            subprocess.run(
-                ["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]wershell", "-NoProfile", "-NonInteractive",
-                 "Get-Process -Name Photoshop -ErrorAction SilentlyContinue "
-                 "| ForEach-Object { $_.CloseMainWindow() | Out-Null }"],
-                creationflags=CREATE_NO_WINDOW
+            subprocess.run([
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-Process -Name Photoshop -ErrorAction SilentlyContinue | ForEach-Object { $_.CloseMainWindow() | Out-Null }",
+            ],
+            creationflags=CREATE_NO_WINDOW
             )
         except Exception as e:
-            _log(f"ps-close: close request err: {e}")
+            _log("ps-close: close request err: {e}")
         time.sleep(max(0, grace_ms) / 1000.0)
         if force and _ps_running():
             try:
-                subprocess.run(["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]skkill", "/IM", "Photoshop.exe", "/T", "/F"], creationflags=CREATE_NO_WINDOW)
+                subprocess.run(["taskkill", "/IM", "Photoshop.exe", "/T", "/F"], creationflags=CREATE_NO_WINDOW)
                 _log("ps-close: taskkill /F issued")
             except Exception as e:
                 _log(f"ps-close: taskkill err: {e}")
     threading.Thread(target=_run, daemon=True).start()
-
-#──────── 본문 페이지 ────────
+# 사진 출력 뷰 페이지를 구성한다.
 class PrintViewPage(BasePage):
-    """
-    설정: C:\\PhotoBox\\settings.json (릴리즈 전 defaults.json으로 복사 예정).
-    단계: Ratio → Liquify → Neural(DoAction 비동기; ENTER 타이머 즉시 시작) → Background.
-    """
     def __init__(self, theme, session: dict, parent: Optional[QWidget] = None):
         # 하트비트 시작(사라짐 진단)
         self._hb_timer = QTimer()
@@ -648,6 +648,19 @@ class PrintViewPage(BasePage):
         except Exception: active_idx = 4
         super().__init__(theme, steps=step_labels, active_index=active_idx, parent=parent)
 
+        # 경로 설정: 세션/설정값이 없으면 안전한 기본값을 사용한다.
+        # - ORIGIN_PATH: 포토샵 원본 사진 경로
+        # - EDITED_DONE/RAW_DONE/LIQUIFY_DONE: 단계별 결과 파일 경로
+        # - SETTING_DIR/PRESET_DIR: 프리셋/설정 폴더
+        # - AI_ORIGIN: AI 파이프라인 출력(미리보기용) 경로
+        self.ORIGIN_PATH  = _deep_get(self.config, "paths.origin",       r"C:\\PhotoBox\\origin_photo.jpg")
+        self.EDITED_DONE  = _deep_get(self.config, "paths.edited_done",  r"C:\\PhotoBox\\edited_photo.jpg")
+        self.RAW_DONE     = _deep_get(self.config, "paths.raw_done",     r"C:\\PhotoBox\\raw.jpg")
+        self.LIQUIFY_DONE = _deep_get(self.config, "paths.liquify_done", r"C:\\PhotoBox\\liquify.jpg")
+        self.SETTING_DIR  = _deep_get(self.config, "paths.setting_dir",  r"C:\\PhotoBox\\setting")
+        self.PRESET_DIR   = _deep_get(self.config, "paths.preset_dir",   r"C:\\PhotoBox\\setting\\preset")
+        self.AI_ORIGIN    = _deep_get(self.config, "paths.ai_out",       r"C:\\PhotoBox\\ai_origin_photo.jpg")
+
         # 액션
         self.PS_RATIO_SET = _deep_get(self.config, "photoshop.ratio.set", "Default")
         self.PS_ACT_3040  = _deep_get(self.config, "photoshop.ratio.action_3040", "3X4")
@@ -661,7 +674,7 @@ class PrintViewPage(BasePage):
                                       ["grada_blue","grada_brown","grada_gray"])
 
         # Neural(DoAction 사용)
-        self.PS_NEU_SET   = _deep_get(self.config, "photoshop.neural.set", "셀프스튜디오")
+        self.PS_NEU_SET   = _deep_get(self.config, "photoshop.neural.set", "Default")
         self.PS_NEU_ACT1  = _deep_get(self.config, "photoshop.neural.mode1.action", "neural")
         self.PS_NEU_ACT2  = _deep_get(self.config, "photoshop.neural.mode2.action", "neural_2")
         self.NEURAL_USE_ACTION = bool(_deep_get(self.config, "photoshop.neural.use_action", True))
@@ -731,14 +744,14 @@ class PrintViewPage(BasePage):
 
         # 행/버튼 라벨
         rows_cfg = _deep_get(self.config, "ai.rows", [
-            {"name":"Raw","components":["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"],"2","3"]},
-            {"name":"Liquify","components":["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"],"2","3"]},
-            {"name":"Neural","components":["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"],"2","3"]},
-            {"name":"Background","components":["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"],"2","3"]},
+            {"name":"Raw","components":["1","2","3"]},
+            {"name":"Liquify","components":["1","2","3"]},
+            {"name":"Neural","components":["1","2","3"]},
+            {"name":"Background","components":["1","2","3"]},
         ])
         self._rows: List[Dict] = []
         for i in range(4):
-            row = rows_cfg[i] if i < len(rows_cfg) else {"name": f"Row{i+1}", "components": ["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"],"2","3"]}
+            row = rows_cfg[i] if i < len(rows_cfg) else {"name": f"Row{i+1}", "components": ["1","2","3"]}
             comps = list(row.get("components", []))[:3]
             while len(comps) < 3:
                 comps.append(str(len(comps)+1))
@@ -747,9 +760,9 @@ class PrintViewPage(BasePage):
         # 4행×3열
         self._groups: List[QButtonGroup] = []
         for r_idx, row in enumerate(self._rows):
-            lbl = QLabel(row["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]me"], self._ui); lbl.setObjectName("rowTitle"); lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter); self.grid.addWidget(lbl, r_idx, 0)
+            lbl = QLabel(row["name"], self._ui); lbl.setObjectName("rowTitle"); lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter); self.grid.addWidget(lbl, r_idx, 0)
             grp = QButtonGroup(self._ui); grp.setExclusive(True); self._groups.append(grp)
-            for c_idx, text in enumerate(row["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]mponents"][:3]):
+            for c_idx, text in enumerate(row["components"][:3]):
                 btn = ShadowButton(str(text), self._ui); btn.setObjectName("sel"); btn.setCheckable(True)
                 btn.setTextShadow(int(self.TOK.get('shadow_dx',0)), int(self.TOK.get('shadow_dy',1)), self.TOK.get('shadow_color','#000000'))
                 btn.setTextColors(self.COL['primary_str'], '#FFFFFF')
@@ -842,10 +855,12 @@ class PrintViewPage(BasePage):
             self._act_worker = None
 
     def _rebuild_qss(self) -> None:
-        c = self.COL["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]imary_str"]; p = self.COL["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]imary"]; r,g,b = p.red(),p.green(),p.blue()
+        # UI 컬러/토큰을 바탕으로 미리보기/버튼 스타일을 재생성한다.
+        c = self.COL["primary_str"]; p = self.COL["primary"]; r,g,b = p.red(),p.green(),p.blue()
         hov = f"rgba({r},{g},{b},30)"
-        bdr = int(self.TOK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]rder"]); pv=int(self.TOK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]n_pad_v"]); ph=int(self.TOK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]n_pad_h"])
-        br_prev=int(self.TOK['preview_radius']); br_btn=int(self.TOK['btn_radius'])
+        bdr = int(self.TOK["border"]); pv=int(self.TOK["btn_pad_v"]); ph=int(self.TOK["btn_pad_h"])
+        br_prev = int(self.TOK.get('preview_radius', bdr))
+        br_btn  = int(self.TOK.get('btn_radius', max(4, bdr)))
         fs_row=int(self.TOK['row_fs']); fw_row=int(self.TOK['row_weight']); fs_btn=int(self.TOK['btn_fs']); b2=max(1, int(self.TOK['border']*2))
         self._qss = f"""
         QFrame#preview {{
@@ -1075,9 +1090,9 @@ class PrintViewPage(BasePage):
     #── Neural 진행 시퀀스(선택 → 계획) ──
     def _neural_plan_from_selection(self) -> List[str]:
         sel = int(self._sel_idx.get(2, 0))
-        if sel == 0:  return ["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]de1"]
-        if sel == 1:  return ["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]de1", "mode2"]
-        return ["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]de1", "mode2", "mode2"]
+        if sel == 0:  return ["mode1"]
+        if sel == 1:  return ["mode1", "mode2"]
+        return ["mode1", "mode2", "mode2"]
 
     # ========== Neural: DoAction 모드 (기본) ==========
     def _start_neural_chain(self):
@@ -1364,13 +1379,6 @@ class PrintViewPage(BasePage):
         self._apply_preview_size()
         # showEvent에서 삭제/오버레이/감시/생성까지 처리하므로 여기서는 시작하지 않음
         return True
-
-
-
-
-
-
-
 
 
 

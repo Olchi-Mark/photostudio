@@ -241,7 +241,17 @@ class CapturePage(BasePage):
         self.ctrl = QWidget(self)
         hb = QHBoxLayout(self.ctrl); hb.setContentsMargins(0,0,0,0); hb.setSpacing(0); hb.setAlignment(Qt.AlignHCenter)
         self.cam_led = QLabel(self.ctrl); self.cam_led.setObjectName("CamLED"); hb.addWidget(self.cam_led, 0)
-        # 지연 버튼(3/5/7초)은 생성하지 않는다(요구사항).
+        self.delay3 = QPushButton("3s", self.ctrl); self.delay3.setObjectName("Delay3"); self.delay3.setCheckable(True)
+        self.delay5 = QPushButton("5s", self.ctrl); self.delay5.setObjectName("Delay5"); self.delay5.setCheckable(True)
+        self.delay7 = QPushButton("7s", self.ctrl); self.delay7.setObjectName("Delay7"); self.delay7.setCheckable(True)
+        self.delay_group = QButtonGroup(self)
+        for i, b in ((3,self.delay3),(5,self.delay5),(7,self.delay7)): self.delay_group.addButton(b, i); hb.addWidget(b, 0)
+        self.delay_group.setExclusive(True); self.delay3.setChecked(True)
+        try: self.delay_group.idClicked.disconnect(self._on_delay_changed)
+        except Exception: pass
+        for b in (self.delay3, self.delay5, self.delay7):
+            try: b.setEnabled(False); b.setVisible(False)
+            except Exception: pass
         self.btn_capture = QPushButton("Capture", self.ctrl); self.btn_capture.setObjectName("BtnCapture")
         self.btn_retake  = QPushButton("Retake", self.ctrl); self.btn_retake.setObjectName("BtnRetake")
         self.btn_capture.clicked.connect(self._on_capture_clicked)
@@ -268,8 +278,6 @@ class CapturePage(BasePage):
         # ?꾨젅??濡쒓퉭 二쇨린 ?쒖뼱(1珥??⑥쐞)
         self._last_qimage_log_ms = 0
         self._seq_count_left = 0
-        # 카메라 연결 진행 중 여부 플래그를 초기화한다.
-        self._connecting = False
 
         self._lv_status_hooked = False   # statusChanged ?곌껐 ?뚮옒洹?        self._connecting = False         # ?곌껐 吏꾪뻾 以??뚮옒洹?
         self._rebuild_layout_tokens(); self._apply_layout_tokens()
@@ -280,7 +288,7 @@ class CapturePage(BasePage):
             if hasattr(bus, "changed"): bus.changed.connect(self._on_settings_changed)
         except Exception: pass
         # ?쇱씠釉뚮럭 start ?몄텧(吏꾩엯 濡쒓렇)
-        try: _log.info("[CONN] start enter")
+        try: _log.info("[CONN] start 以鍮?)
         except Exception: pass
 
         self.setCentralWidget(center, margin=(0,0,0,0), spacing=0, center=False, max_width=None)
@@ -288,8 +296,7 @@ class CapturePage(BasePage):
 
         self._read_ratio()
 
-        # 오버레이 위젯을 생성한다.
-        self.overlay = AiOverlay(self)
+        # ?ㅻ쾭?덉씠??        self.overlay = AiOverlay(self)
         try: self.overlay.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         except Exception: pass
         try:
@@ -297,9 +304,9 @@ class CapturePage(BasePage):
         except Exception: pass
         self.overlay.setGeometry(self.rect()); self.overlay.hide(); self.overlay.lower()
 
-        self.busy = BusyOverlay(self, "카메라 연결 중")
+        self.busy = BusyOverlay(self, "移대찓???곌껐以?)
         try:
-            self.busy.setText("카메라 연결 중")
+            self.busy.setText("移대찓???곌껐以?)
         except Exception:
             pass
         self.busy.hide()
@@ -346,7 +353,7 @@ class CapturePage(BasePage):
         self._first_frame_seen = False
         self._conn_phase = 0               # 0: ?곌껐以? 1: 吏?곗쨷
         self._conn_started = time.time()
-        self._show_connect_overlay("Connecting camera...")
+        self._show_connect_overlay("移대찓???곌껐以?)
         self._conn_timer.start()
 
 
@@ -470,10 +477,10 @@ class CapturePage(BasePage):
             pass
         self._clear_captures()
         # UI ?좉툑留??섑뻾(罹≪쿂/Prev/Next 鍮꾪솢??. _capturing? False ?좎?
-        # UI 잠금(캡처/Prev/Next 비활성)과 캡처 상태 플래그 설정
-        self._lock_ui_for_capture(True)
-        
-        
+        self.set_prev_mode("disabled"); self.set_prev_enabled(False)
+        self.set_next_mode("disabled"); self.set_next_enabled(False)
+        try: self.btn_capture.setEnabled(False)
+        except Exception: pass
         # ?ㅻ쾭?덉씠 誘몃━ ?쒖떆(媛?대뜕???덈궡)
         try:
             if hasattr(self.overlay, 'refresh_tokens'):
@@ -487,23 +494,11 @@ class CapturePage(BasePage):
                 if hasattr(self.overlay, 'set_badge_center'):
                     self.overlay.set_badge_center(True)
                 if hasattr(self.overlay, 'update_badges'):
-                    self.overlay.update_badges("DEBUG: badge", {})
-                self.overlay.show(); self.overlay.raise_()
-
-
-            except Exception: pass
-
+                    self.overlay.update_badges('DEBUG: 중앙 테스트', {})
+            except Exception:
+                pass
+            self.overlay.show(); self.overlay.raise_()
         except Exception: pass
-        # 가이던스 오버레이 활성화 보조 처리 및 촬영 카운트다운 시작
-        try:
-            self._overlay_show_during_capture()
-        except Exception:
-            pass
-        try:
-            self._start_countdown(1)
-        except Exception:
-            try: self._invoke_shoot(i=0)
-            except Exception: pass
 
     def _on_retake_clicked(self):
         """?ъ눋??踰꾪듉 ?대┃ ??珥ъ쁺 ?곹깭? ?ㅻ쾭?덉씠瑜??댁젣?쒕떎."""
@@ -555,7 +550,7 @@ class CapturePage(BasePage):
         # ?ㅻ쾭?덉씠???⑥? ?쒓컙 諛곗?瑜??쒖떆?쒕떎.
         try:
             if hasattr(self, "overlay") and hasattr(self.overlay, "update_badges"):
-                self.overlay.update_badges("DEBUG: badge", {})
+                    self.overlay.update_badges('DEBUG: 중앙 테스트', {})
                 self.overlay.show(); self.overlay.raise_()
         except Exception:
             pass
@@ -629,8 +624,7 @@ class CapturePage(BasePage):
             # 媛????꾨즺 ???꾨━酉??ㅻ깄?룹쓣 吏??寃쎈줈/?뚯씪紐낆쑝濡????            thumb_path = self._save_preview_snapshot_indexed(int(idx) if idx is not None else 0)
             if not thumb_path:
                 thumb_path = self._save_preview_thumbnail()
-            # ?ㅼ젣 珥ъ쁺 ?뚯씪??吏??寃쎈줈濡??대룞/由щ꽕??
-            try:
+            # ?ㅼ젣 珥ъ쁺 ?뚯씪??吏??寃쎈줈濡??대룞/由щ꽕??            try:
                 move_idx = int(idx) if idx is not None else int(len(self.session.get("shot_paths", [])))
             except Exception:
                 move_idx = 0
@@ -676,10 +670,10 @@ class CapturePage(BasePage):
             try:
                 if hasattr(self, "overlay") and hasattr(self.overlay, "update_badges"):
                     msg = f"珥ъ쁺 ?ㅽ뙣: {err or ''}"
-                    self.overlay.update_badges("DEBUG: badge", {})
+                    self.overlay.update_badges('DEBUG: 중앙 테스트', {})
             except Exception: pass
             self._overlay_hide()
-            self.btn_capture.setText("Capture"); self.btn_capture.setEnabled(True)
+            self.btn_capture.setText("?ъ떆??); self.btn_capture.setEnabled(True)
             for b in (self.delay3, self.delay5, self.delay7):
                 try: b.setEnabled(False)
                 except Exception: pass
@@ -808,12 +802,14 @@ class CapturePage(BasePage):
         except Exception: pass
         try:
             h = int(T.get("CTRL_H", CTRL_H))
-            for b in (self.btn_capture, self.btn_retake):
+            for b in (self.delay3, self.delay5, self.delay7, self.btn_capture, self.btn_retake):
                 b.setFixedHeight(h)
+            self.delay3.setMinimumWidth(int(T.get("W_DELAY", 90)))
+            self.delay5.setMinimumWidth(int(T.get("W_DELAY", 90)))
+            self.delay7.setMinimumWidth(int(T.get("W_DELAY", 90)))
             self.btn_capture.setMinimumWidth(int(T.get("W_ACT", 150)))
             self.btn_retake.setMinimumWidth(int(T.get("W_ACT", 150)))
-        except Exception:
-            pass
+        except Exception: pass
         thin = self._thin_px()
         # LED ?먰삎 + 怨좎젙?ш린
         try:
@@ -834,7 +830,7 @@ class CapturePage(BasePage):
             f"QPushButton#BtnCapture:pressed, QPushButton#BtnRetake:pressed {{ background:{primary}; color:white; }}"
             f"QPushButton#BtnCapture:disabled, QPushButton#BtnRetake:disabled {{ opacity:0.5; }}"
         )
-        try: self.ctrl.setStyleSheet(act)
+        try: self.ctrl.setStyleSheet(chip + act)
         except Exception: pass
         self._refresh_led()
 
@@ -931,7 +927,7 @@ class CapturePage(BasePage):
         """移대찓??LiveView ?곌껐??鍮꾨룞湲곕줈 ?쒖옉?쒕떎(吏???④퀎 ?쒓굅, 濡쒓퉭 媛뺥솕)."""
         if self._connecting: return
         self._connecting = True
-        self.busy.setText("Connecting camera...")
+        self.busy.setText("移대찓???곌껐以?); self.busy.show(); self.busy.raise_()
         self.set_led_mode('off')
 
         # statusChanged 1?뚮쭔
@@ -952,10 +948,8 @@ class CapturePage(BasePage):
         def _work():
             ok = False
             try:
-                try:
-                    _log.info("[CONN] start enter")
-                except Exception:
-                    pass
+                try: _log.info("[CONN] start ?몄텧")
+                except Exception: pass
                 ok = bool(self.lv.start(on_qimage=self._on_qimage))
             except Exception:
                 ok = False
@@ -967,14 +961,14 @@ class CapturePage(BasePage):
                     self.busy.hide()
                 else:
                     self.set_led_mode('off')
-                    self.busy.setText("Connecting camera...")
+                    self.busy.setText("移대찓???곌껐 ?ㅽ뙣")
                     QTimer.singleShot(1300, self.busy.hide)
             QTimer.singleShot(0, _done)
         threading.Thread(target=_work, daemon=True).start()
 
         # ??꾩븘??媛먯떆(12珥?
         def _guard():
-            try: _log.warning("[CONN] 12s elapsed: still connecting")
+            try: _log.warning("[CONN] 12s 寃쎄낵: ?꾩쭅 ?곌껐以?)
             except Exception: pass
             return
             if self._connecting:
@@ -982,7 +976,7 @@ class CapturePage(BasePage):
                 try: self.lv.stop()
                 except Exception: pass
                 self.set_led_mode('off')
-                self.busy.setText("Connecting camera...")
+                self.busy.setText("移대찓???곌껐 吏??)
                 QTimer.singleShot(1300, self.busy.hide)
         QTimer.singleShot(12000, _guard)
 
@@ -1064,13 +1058,11 @@ class CapturePage(BasePage):
                         self.overlay.update_landmarks(payload, normalized=True)
                 except Exception: pass
                 try:
-                    if hasattr(self, '_guidance_message') and hasattr(self.overlay, 'update_badges'):
-                        msg = self._guidance_message(metrics)
-                        self.overlay.update_badges(msg, {})
-                    elif hasattr(self.overlay, 'update_badges'):
-                        self.overlay.update_badges("정면을 바라봐주세요", {})
+                    if hasattr(self.overlay, 'update_badges'):
+                    self.overlay.update_badges('DEBUG: 중앙 테스트', {})
                 except Exception: pass
-                self.overlay.show(); self.overlay.raise_()
+                try: self.overlay.show(); self.overlay.raise_()
+                except Exception: pass
             else:
                 try: self.overlay.hide(); self.overlay.lower()
                 except Exception: pass
@@ -1093,57 +1085,6 @@ class CapturePage(BasePage):
             self.busy.hide(); self.busy.lower()
         except Exception:
             pass
-    
-    # 가이던스 품질을 10프레임 EMA로 완화하고 안내 문구를 생성한다.
-    def _guidance_message(self, metrics: dict) -> str:
-        """가이던스 우선순위(어깨→눈수평→Yaw→Pitch)에 따른 1개 배지 문구를 반환한다."""
-        try:
-            # 내부 헬퍼: EMA 업데이트
-            def _ema(key: str, val: float) -> float:
-                alpha = 2.0 / (10.0 + 1.0)  # 10-frame EMA
-                prev = float(self._ema.get(key, val))
-                cur = (alpha * float(val)) + ((1.0 - alpha) * prev)
-                self._ema[key] = cur
-                return cur
-
-            # 메트릭 추출(존재 시 활용)
-            sh_ok = bool(metrics.get('shoulder_ok', False))
-            eye_ok = bool(metrics.get('eyes_ok', False) or metrics.get('eye_level_ok', False))
-            yaw_ok = bool(metrics.get('yaw_ok', False))
-            pitch_ok = bool(metrics.get('pitch_ok', False))
-
-            # 수치 기반이면 EMA 적용
-            if 'shoulder_level' in metrics:
-                sh = abs(float(metrics.get('shoulder_level', 0.0)))
-                sh = _ema('shoulder_level', sh)
-                # 임계치 기본 2.0 deg-equivalent 또는 노멀라이즈드 값
-                sh_ok = sh <= float(metrics.get('shoulder_thr', 2.0))
-            if 'eyes_horiz' in metrics:
-                eh = abs(float(metrics.get('eyes_horiz', 0.0)))
-                eh = _ema('eyes_horiz', eh)
-                eye_ok = eh <= float(metrics.get('eyes_thr', 2.0))
-            if 'yaw_deg' in metrics:
-                yw = abs(float(metrics.get('yaw_deg', 0.0)))
-                yw = _ema('yaw_deg', yw)
-                yaw_ok = yw <= float(metrics.get('yaw_thr', 5.0))
-            if 'pitch_deg' in metrics:
-                ph = abs(float(metrics.get('pitch_deg', 0.0)))
-                ph = _ema('pitch_deg', ph)
-                pitch_ok = ph <= float(metrics.get('pitch_thr', 5.0))
-
-            # 우선순위에 따라 한 문구만 노출
-            if not sh_ok:
-                return "어깨를 수평으로 맞춰주세요"
-            if not eye_ok:
-                return "눈이 수평이 되게 해주세요"
-            if not yaw_ok:
-                return "정면을 바라봐주세요"
-            if not pitch_ok:
-                return "턱과 고개 각도를 맞춰주세요"
-            # 모두 정상일 때
-            return "좋습니다! 준비해주세요"
-        except Exception:
-            return "정면을 바라봐주세요"
     def _stop_camera(self):
         # statusChanged留??댁젣
         self._conn_timer.stop()
@@ -1173,7 +1114,7 @@ class CapturePage(BasePage):
         return
         if elapsed > 10 and self._conn_phase < 1:
             self._conn_phase = 1
-            self._show_connect_overlay("Connecting camera...")
+            self._show_connect_overlay("移대찓???곌껐 吏??)
         elif elapsed > 20:
             self._show_connect_overlay("移대찓???곌껐 ?ㅽ뙣. USB/?꾩썝???뺤씤?섏꽭??")
 
@@ -1218,9 +1159,9 @@ class CapturePage(BasePage):
     def _overlay_show_during_capture(self):
         """珥ъ쁺 吏꾪뻾 以?媛?대뱶 ?ㅻ쾭?덉씠瑜??쒖떆?쒕떎(踰꾪듉 ?좊컻留?."""
         try:
-            # 버튼으로 시작한 촬영에서만 오버레이를 표시한다.
-            if not getattr(self, "_overlay_from_button", False):
+            # 踰꾪듉?쇰줈 ?쒖옉??珥ъ쁺???꾨땲硫??ㅻ쾭?덉씠瑜??쒖떆?섏? ?딅뒗??            if not getattr(self, "_overlay_from_button", False):
                 return
+            self._capturing = True
             if not getattr(self, "overlay", None): return
             # 媛?대뱶 ?쇱씤???쒖떆?섎룄濡??좏겙 ?ㅼ젙
             try:
@@ -1247,10 +1188,10 @@ class CapturePage(BasePage):
                 if hasattr(self.overlay, 'set_badge_center'):
                     self.overlay.set_badge_center(True)
                 if hasattr(self.overlay, 'update_badges'):
-                    self.overlay.update_badges("DEBUG: badge", {})
+                    self.overlay.update_badges('DEBUG: 중앙 테스트', {})
             except Exception:
                 pass
-                self.overlay.show(); self.overlay.raise_()
+            self.overlay.show(); self.overlay.raise_()
         except Exception: pass
 
     def _overlay_hide(self):
@@ -1333,7 +1274,7 @@ class CapturePage(BasePage):
         threading.Thread(target=_run, daemon=True).start()
 
     def _cmd_shoot_one(self):
-        self.toast.popup("Shooting...")
+        self.toast.popup("珥ъ쁺??)
         def _run():
             ok = False
             try:
@@ -1534,7 +1475,6 @@ class CapturePage(BasePage):
             except Exception: pass
             if callable(callback): QTimer.singleShot(0, callback)
         threading.Thread(target=_work, daemon=True).start()
-
 
 
 
