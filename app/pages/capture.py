@@ -520,9 +520,14 @@ class CapturePage(BasePage):
         self._count_left = 0; self._capturing = False
         self._overlay_from_button = False
         self.btn_capture.setEnabled(True)
-        for b in (self.delay3, self.delay5, self.delay7):
-            try: b.setEnabled(False)
-            except Exception: pass
+        # 3/5/7 지연 버튼이 더 이상 없을 수 있으므로 존재 여부를 확인한다.
+        for _name in ('delay3','delay5','delay7'):
+            b = getattr(self, _name, None)
+            if b is None: continue
+            try:
+                b.setEnabled(False)
+            except Exception:
+                pass
         self._overlay_hide()
         self.set_next_enabled(False); self.set_next_mode("disabled")
         self.set_prev_mode("enabled"); self.set_prev_enabled(True)
@@ -545,9 +550,13 @@ class CapturePage(BasePage):
         self._capturing = bool(on)
         self.set_prev_mode("disabled"); self.set_prev_enabled(False)
         self.set_next_mode("disabled"); self.set_next_enabled(False)
-        for b in (self.delay3, self.delay5, self.delay7):
-            try: b.setEnabled(False)
-            except Exception: pass
+        for _name in ('delay3','delay5','delay7'):
+            b = getattr(self, _name, None)
+            if b is None: continue
+            try:
+                b.setEnabled(False)
+            except Exception:
+                pass
         try: self.btn_capture.setEnabled(not on)
         except Exception: pass
 
@@ -689,9 +698,13 @@ class CapturePage(BasePage):
             except Exception: pass
             self._overlay_hide()
             self.btn_capture.setText("촬영"); self.btn_capture.setEnabled(True)
-            for b in (self.delay3, self.delay5, self.delay7):
-                try: b.setEnabled(False)
-                except Exception: pass
+            for _name in ('delay3','delay5','delay7'):
+                b = getattr(self, _name, None)
+                if b is None: continue
+                try:
+                    b.setEnabled(False)
+                except Exception:
+                    pass
             self.set_prev_mode("enabled"); self.set_prev_enabled(True)
             self.set_next_mode("disabled"); self.set_next_enabled(False)
             self._capturing = False
