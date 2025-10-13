@@ -332,6 +332,8 @@ class CapturePage(BasePage):
         except Exception:
             pass
 
+        # 저장 디렉터리 설정 여부 플래그를 초기화한다.
+        self._save_dir_set = False
 
     # ??????????????????????????????????????????????????????????
     def showEvent(self, e):
@@ -1004,6 +1006,34 @@ class CapturePage(BasePage):
         try:
             w, h = self.preview_label.width(), self.preview_label.height()
             mode = getattr(self.lv, 'mode', 'off')
+            mode = getattr(self.lv, 'mode', 'off')
+            # SDK 모드에서 저장 디렉터리를 보장한다(최초 1회).
+            try:
+                if mode == 'sdk' and not getattr(self, '_save_dir_set', False):
+                    from pathlib import Path as _P
+                    _raw = _P(r"C:\\PhotoBox\\raw"); _raw.mkdir(parents=True, exist_ok=True)
+                    cam = getattr(self.lv, 'cam', None) or getattr(self, '_cam', None) or self.lv
+                    if hasattr(cam, 'set_save_dir'):
+                        cam.set_save_dir(r"C:\\PhotoBox\\raw")
+                        self._save_dir_set = True
+                        try: _log.info("[SAVE] dir=%s", r"C:\\PhotoBox\\raw")
+                        except Exception: pass
+                # 저장 디렉터리를 C:\PhotoBox\raw 로 강제 지정하고 폴더를 보장한다.
+                try:
+                    from pathlib import Path as _P
+                    _raw = _P(r"C:\\PhotoBox\\raw"); _raw.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+                if hasattr(cam, 'set_save_dir'):
+                    try:
+                        cam.set_save_dir(r"C:\\PhotoBox\\raw")
+                        self._save_dir_set = True
+                        try: _log.info("[SAVE] dir=%s", r"C:\\PhotoBox\\raw")
+                        except Exception: pass
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
             # 1) ?뚯쟾/誘몃윭 蹂????媛濡?留욎땄, ?꾨옒 ?щ∼
             pix = QPixmap()
@@ -1541,6 +1571,7 @@ class CapturePage(BasePage):
             except Exception: pass
             if callable(callback): QTimer.singleShot(0, callback)
         threading.Thread(target=_work, daemon=True).start()
+
 
 
 
