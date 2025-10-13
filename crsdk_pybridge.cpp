@@ -1,4 +1,4 @@
-// crsdk_pybridge.cpp — Sony Camera Remote SDK v2.0 bridge (DLL)
+﻿// crsdk_pybridge.cpp — Sony Camera Remote SDK v2.0 bridge (DLL)
 // Build: x64, C++17, /MD, Unicode
 // Include: <SDK>\app\CRSDK   Link: Cr_Core.lib
 
