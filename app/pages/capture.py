@@ -126,47 +126,46 @@ P2_GAP = 30; CTRL_H = 45; BTN_R = 12; LED_D = 12; CTRL_GAP = 21
 
 # ?? 媛꾨떒 Busy/Toast ?ㅻ쾭?덉씠 ????????????????????????????????????????????????
 class BusyOverlay(QWidget):
-    def __init__(self, parent: QWidget, text="移대찓???곌껐以?):
+    """바쁜 상태를 반투명 배경과 스피너/문구로 표시한다."""
+    def __init__(self, parent: QWidget, text: str = "카메라 연결중"):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.setStyleSheet("background: rgba(0,0,0,128);")
-        self.msg = QLabel(text, self)
+        self.msg = QLabel("", self)
         self.msg.setStyleSheet("color:white;")
-        f = QFont()
-        f.setPointSize(16); f.setBold(True)
+        f = QFont(); f.setPointSize(16); f.setBold(True)
         self.msg.setFont(f)
         self.msg.setAlignment(Qt.AlignCenter)
-        # 珥덇린 ?띿뒪?몃룄 留먯쨪?꾪몴 ?쒓굅 洹쒖튃???곸슜?쒕떎.
-        try: self.setText(text)
-        except Exception: pass
+        self.setText(text)
         self._dots = 0
-        # ?ㅽ뵾???곹깭 媛?珥덇린??        self._angle = 0
+        self._angle = 0
         self._spinner_radius = 24
         self._spinner_thickness = 4
         self._timer = QTimer(self); self._timer.setInterval(100); self._timer.timeout.connect(self._spin)
+
     def showEvent(self, _):
         self.resize(self.parentWidget().size()); self.msg.setGeometry(0,0,self.width(),self.height())
         self._dots = 0; self._timer.start()
-    def hideEvent(self, _): self._timer.stop()
-    def setText(self, t: str):
-        # 湲곕낯 ?띿뒪?몄쓽 留먯쨪?꾪몴(???먮뒗 ...)???쒓굅?섏뿬 以묐났 ???쒓린瑜?諛⑹??쒕떎.
-        try:
-            base = (t or "").rstrip(' .??)
-        except Exception:
-            base = t
-        self.msg.setText(base)
-    def _tick(self):
-        self._dots = (self._dots + 1) % 4
-        base = self.msg.text().split('??)[0].rstrip('.').rstrip()
-        self.msg.setText(f"{base}?? + "."*self._dots)
 
-    # ?뚯쟾 ?ㅽ뵾????대㉧ 肄쒕갚
+    def hideEvent(self, _):
+        self._timer.stop()
+
+    def setText(self, t: str):
+        """문구의 말줄임표/공백을 정리하고 기본 문구로 표시한다."""
+        base = str(t or "").rstrip(" .")
+        self.msg.setText(base)
+
+    def _tick(self):
+        """점(.) 애니메이션으로 진행 상황을 표시한다."""
+        self._dots = (self._dots + 1) % 4
+        base = self.msg.text().rstrip(" .")
+        self.msg.setText(base + "." * self._dots)
+
     def _spin(self):
         self._angle = (self._angle + 20) % 360
         self.update()
 
-    # ?ㅽ뵾?덈? 洹몃┛??
     def paintEvent(self, ev):
         try:
             qp = QPainter(self)
@@ -184,7 +183,6 @@ class BusyOverlay(QWidget):
             qp.end()
         except Exception:
             pass
-
 class Toast(QWidget):
     def __init__(self, parent: QWidget):
         super().__init__(parent)
@@ -1487,6 +1485,7 @@ class CapturePage(BasePage):
             except Exception: pass
             if callable(callback): QTimer.singleShot(0, callback)
         threading.Thread(target=_work, daemon=True).start()
+
 
 
 

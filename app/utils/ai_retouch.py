@@ -348,9 +348,11 @@ def _adjust_eyes(bgr: np.ndarray, *, strength: float = 0.45, enable: bool = True
     grow = 1.0
     # ?뚯뒪??紐⑤뱶: ?묒? 履쎌쓣 臾댁“嫄?+50% ?뺣?
     if areaL < areaR:
+        gap = (areaR / areaL) - 1.0
         grow = 1.0 + min(0.05, max(0.0, strength * gap))
         target = ('L', cxL, cyL, wL, hL)
     else:
+        gap = (areaL / areaR) - 1.0
         grow = 1.0 + min(0.05, max(0.0, strength * gap))
         target = ('R', cxR, cyR, wR, hR)
     if abs(grow - 1.0) < 1e-3:
@@ -361,6 +363,7 @@ def _adjust_eyes(bgr: np.ndarray, *, strength: float = 0.45, enable: bool = True
     # ?뺣? ?됰젹(以묒떖 湲곗?)
     M = np.array([[grow, 0.0, (1 - grow) * cx_px], [0.0, grow, (1 - grow) * cy_px]], np.float32)
     layer = cv2.warpAffine(bgr, M, (W, H), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
+    m = np.zeros((H, W), np.uint8)
     # ???留덉뒪?щ줈 釉붾젋??    m = np.zeros((H, W), np.uint8)
     cv2.ellipse(m, (cx_px, cy_px), (rx, ry), 0, 0, 360, 255, -1, cv2.LINE_AA)
     m = cv2.GaussianBlur(m, (0, 0), max(2.0, min(rx, ry) * 0.30)).astype('float32') / 255.0
@@ -469,4 +472,5 @@ def process_file(
     except Exception as e:
         logger.error("[retouch] 泥섎━ ?ㅽ뙣: %s", e)
         return False
+
 
