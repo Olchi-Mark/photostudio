@@ -23,6 +23,7 @@ os.environ.setdefault("CRSDK_DLL", r"C:\dev\photostudio\crsdk_pybridge.dll")
 
 # 濡쒓굅: 罹≪쿂 ?섏씠吏??濡쒓굅
 _log = logging.getLogger("CAP")
+DEBUG_CAP = (str(os.getenv("CAP_DEBUG", "1")).strip() == "1")
 
 # CameraControl 사용(가능 시), 실패 시 None 처리
 try:
@@ -344,6 +345,10 @@ class CapturePage(BasePage):
         self._first_frame_seen = False
         self._conn_timer = QTimer(self); self._conn_timer.setInterval(400)
         self._conn_timer.timeout.connect(self._conn_tick)
+
+        # Debug flag and throttling timestamp
+        self._debug = bool(DEBUG_CAP)
+        self._dbg_last_ms = 0
 
         # 진입 시 기존 카메라 연결을 안전하게 해제한다.
         try:
@@ -1106,6 +1111,24 @@ class CapturePage(BasePage):
                         self.get_ratio(), ts,
                         getattr(self, 'face', None), getattr(self, 'pose', None)
                     )
+                    # Debug: guidance metrics summary (1s throttle)
+                    try:
+                        if self._debug:
+                            ts_ms2 = int(time.time() * 1000)
+                            if ts_ms2 - int(getattr(self, '_dbg_last_ms', 0)) >= 1000:
+                                self._dbg_last_ms = ts_ms2
+                                m = _metrics0 or {}
+                                _log.info(
+                                    "[GUD] ready=%s ok=%.2f sh=%.1f eye=%.2f yaw=%.1f pitch=%.1f",
+                                    int(bool(m.get('ready', 0.0))),
+                                    float(m.get('ok_all', 0.0)),
+                                    float(m.get('shoulder_deg', 0.0)),
+                                    float(m.get('eye_h%', 0.0)),
+                                    float(m.get('yaw_deg', 0.0)),
+                                    float(m.get('pitch_deg', 0.0)),
+                                )
+                    except Exception:
+                        pass
                     try: self._check_auto_sequence(_metrics0)
                     except Exception: pass
             except Exception:
@@ -1324,6 +1347,10 @@ class CapturePage(BasePage):
                         self.overlay.setGeometry(self.rect())
                         self._overlay_update_hole()
                         self.overlay.show(); self.overlay.raise_()
+                        try:
+                            _log.info("[OVL] forced show (armed=%s cap=%s)", getattr(self, '_armed_for_auto', False), getattr(self, '_capturing', False))
+                        except Exception:
+                            pass
             except Exception:
                 pass
             # 가이던스/배지 설정 후 오버레이를 반드시 표시한다.
