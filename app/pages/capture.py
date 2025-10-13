@@ -295,6 +295,14 @@ class CapturePage(BasePage):
         try:
             if hasattr(self.overlay, "bind_session"): self.overlay.bind_session(self.session)
         except Exception: pass
+        # 프리뷰 비율/홀을 초기에 바인딩해 첫 페인트에서 비어 보이지 않게 한다.
+        try:
+            if hasattr(self.overlay, 'set_ratio_from_session'):
+                self.overlay.set_ratio_from_session(self.get_ratio())
+            if hasattr(self.overlay, 'bind_hole_widget'):
+                self.overlay.bind_hole_widget(self.preview_label, shrink_px=0)
+        except Exception:
+            pass
         self.overlay.setGeometry(self.rect()); self.overlay.hide(); self.overlay.lower()
 
         self.busy = BusyOverlay(self, "카메라 연결 중")
@@ -315,6 +323,18 @@ class CapturePage(BasePage):
             from app.utils.pose_engine import PoseEngine  # type: ignore
             self.pose = PoseEngine()
         except Exception: self.pose = None
+
+        # 얼굴/포즈 엔진을 즉시 시작해 가이던스가 동작하도록 한다.
+        try:
+            if getattr(self, 'face', None) and hasattr(self.face, 'start'):
+                self.face.start()
+        except Exception:
+            pass
+        try:
+            if getattr(self, 'pose', None) and hasattr(self.pose, 'start'):
+                self.pose.start()
+        except Exception:
+            pass
 
         self._ai_rate_ms = 500; self._ai_last_ms = 0; self._ema: Dict[str, float] = {}
         self.guide = Guidance(rate_ms=500)
@@ -508,11 +528,8 @@ class CapturePage(BasePage):
             self._overlay_show_during_capture()
         except Exception:
             pass
-        try:
-            self._start_countdown(1)
-        except Exception:
-            try: self._invoke_shoot(i=0)
-            except Exception: pass
+        # 버튼 클릭 시 즉시 촬영하지 않는다.
+        # 가이던스가 ready(0.8s 연속)일 때 _check_auto_sequence -> _start_auto_sequence(5s 카운트다운)로 진입한다.
 
     def _on_retake_clicked(self):
         """?ъ눋??踰꾪듉 ?대┃ ??珥ъ쁺 ?곹깭? ?ㅻ쾭?덉씠瑜??댁젣?쒕떎."""
@@ -1019,7 +1036,6 @@ class CapturePage(BasePage):
         try:
             w, h = self.preview_label.width(), self.preview_label.height()
             mode = getattr(self.lv, 'mode', 'off')
-            mode = getattr(self.lv, 'mode', 'off')
             # SDK 모드에서 저장 디렉터리를 보장한다(최초 1회).
             try:
                 if mode == 'sdk' and not getattr(self, '_save_dir_set', False):
@@ -1300,7 +1316,18 @@ class CapturePage(BasePage):
                     self.overlay.update_badges("DEBUG: badge", {})
             except Exception:
                 pass
-                self.overlay.show(); self.overlay.raise_()
+
+            # 버튼으로 무장된 상태인데 오버레이가 아직 숨겨져 있으면 강제 표시/정렬한다.
+            try:
+                if (getattr(self, '_armed_for_auto', False) or getattr(self, '_capturing', False)):
+                    if hasattr(self, 'overlay') and self.overlay and not self.overlay.isVisible():
+                        self.overlay.setGeometry(self.rect())
+                        self._overlay_update_hole()
+                        self.overlay.show(); self.overlay.raise_()
+            except Exception:
+                pass
+            # 가이던스/배지 설정 후 오버레이를 반드시 표시한다.
+            self.overlay.show(); self.overlay.raise_()
         except Exception: pass
 
     def _overlay_hide(self):
