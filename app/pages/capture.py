@@ -242,8 +242,8 @@ class CapturePage(BasePage):
         hb = QHBoxLayout(self.ctrl); hb.setContentsMargins(0,0,0,0); hb.setSpacing(0); hb.setAlignment(Qt.AlignHCenter)
         self.cam_led = QLabel(self.ctrl); self.cam_led.setObjectName("CamLED"); hb.addWidget(self.cam_led, 0)
         # 지연 버튼(3/5/7초)은 생성하지 않는다(요구사항).
-        self.btn_capture = QPushButton("Capture", self.ctrl); self.btn_capture.setObjectName("BtnCapture")
-        self.btn_retake  = QPushButton("Retake", self.ctrl); self.btn_retake.setObjectName("BtnRetake")
+        self.btn_capture = QPushButton("촬영", self.ctrl); self.btn_capture.setObjectName("BtnCapture")
+        self.btn_retake  = QPushButton("재촬영", self.ctrl); self.btn_retake.setObjectName("BtnRetake")
         self.btn_capture.clicked.connect(self._on_capture_clicked)
         self.btn_retake.clicked.connect(self._on_retake_clicked)
         hb.addWidget(self.btn_capture, 0); hb.addWidget(self.btn_retake, 0)
@@ -325,6 +325,13 @@ class CapturePage(BasePage):
         self._conn_timer = QTimer(self); self._conn_timer.setInterval(400)
         self._conn_timer.timeout.connect(self._conn_tick)
 
+        # 진입 시 기존 카메라 연결을 안전하게 해제한다.
+        try:
+            if hasattr(self.lv, 'stop'):
+                self.lv.stop()
+        except Exception:
+            pass
+
 
     # ??????????????????????????????????????????????????????????
     def showEvent(self, e):
@@ -346,7 +353,7 @@ class CapturePage(BasePage):
         self._first_frame_seen = False
         self._conn_phase = 0               # 0: ?곌껐以? 1: 吏?곗쨷
         self._conn_started = time.time()
-        self._show_connect_overlay("Connecting camera...")
+        self._show_connect_overlay("카메라 연결 중")
         self._conn_timer.start()
 
 
@@ -679,7 +686,7 @@ class CapturePage(BasePage):
                     self.overlay.update_badges("DEBUG: badge", {})
             except Exception: pass
             self._overlay_hide()
-            self.btn_capture.setText("Capture"); self.btn_capture.setEnabled(True)
+            self.btn_capture.setText("촬영"); self.btn_capture.setEnabled(True)
             for b in (self.delay3, self.delay5, self.delay7):
                 try: b.setEnabled(False)
                 except Exception: pass
@@ -931,7 +938,7 @@ class CapturePage(BasePage):
         """移대찓??LiveView ?곌껐??鍮꾨룞湲곕줈 ?쒖옉?쒕떎(吏???④퀎 ?쒓굅, 濡쒓퉭 媛뺥솕)."""
         if self._connecting: return
         self._connecting = True
-        self.busy.setText("Connecting camera...")
+        self.busy.setText("카메라 연결 중")
         self.set_led_mode('off')
 
         # statusChanged 1?뚮쭔
@@ -967,7 +974,7 @@ class CapturePage(BasePage):
                     self.busy.hide()
                 else:
                     self.set_led_mode('off')
-                    self.busy.setText("Connecting camera...")
+                    self.busy.setText("카메라 연결 중")
                     QTimer.singleShot(1300, self.busy.hide)
             QTimer.singleShot(0, _done)
         threading.Thread(target=_work, daemon=True).start()
@@ -982,7 +989,7 @@ class CapturePage(BasePage):
                 try: self.lv.stop()
                 except Exception: pass
                 self.set_led_mode('off')
-                self.busy.setText("Connecting camera...")
+                self.busy.setText("카메라 연결 중")
                 QTimer.singleShot(1300, self.busy.hide)
         QTimer.singleShot(12000, _guard)
 
@@ -1173,7 +1180,7 @@ class CapturePage(BasePage):
         return
         if elapsed > 10 and self._conn_phase < 1:
             self._conn_phase = 1
-            self._show_connect_overlay("Connecting camera...")
+            self._show_connect_overlay("카메라 연결 중")
         elif elapsed > 20:
             self._show_connect_overlay("移대찓???곌껐 ?ㅽ뙣. USB/?꾩썝???뺤씤?섏꽭??")
 
@@ -1333,7 +1340,7 @@ class CapturePage(BasePage):
         threading.Thread(target=_run, daemon=True).start()
 
     def _cmd_shoot_one(self):
-        self.toast.popup("Shooting...")
+        self.toast.popup("촬영 중...")
         def _run():
             ok = False
             try:
