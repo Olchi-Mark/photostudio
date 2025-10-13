@@ -13,6 +13,8 @@
 #include <vector>
 #include <cstdio>
 #include <io.h>
+#include <filesystem>   // [ADD] 저장 폴더 생성 지원
+#include <mutex>        // [ADD] 다운로드 경로 동시성 보호
 
 #include "CrTypes.h"
 #include "CrError.h"
@@ -35,8 +37,10 @@ static inline bool is_timeout(SCRSDK::CrError e) {
 static inline bool is_disconnected(SCRSDK::CrError e) {
     return e == SCRSDK::CrError_Connect_Disconnected;
 }
-static std::wstring g_download_dir;
+// 다운로드 기준 폴더와 마지막 저장 파일 경로
+static std::wstring g_download_dir = L"C\\:\\PhotoBox\\raw"; // 기본값
 static std::wstring g_last_saved;
+static std::mutex   g_dl_mu;
 
 
 // ===== helpers =====
@@ -46,6 +50,19 @@ static std::wstring widen_from_acp(const char* s) {
     if (n <= 1) return {};
     std::wstring w; w.resize(n - 1);
     MultiByteToWideChar(CP_ACP, 0, s, -1, w.data(), n);
+    return w;
+}
+
+// UTF-8(또는 ACP 폴백) → UTF-16 변환을 수행한다.
+static std::wstring to_wide(const char* s) {
+    if (!s || !*s) return L"";
+    int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, nullptr, 0);
+    if (n <= 0) n = MultiByteToWideChar(CP_ACP, 0, s, -1, nullptr, 0);
+    std::wstring w; w.resize((size_t)std::max(0, n - 1));
+    if (n > 0) {
+        int m = MultiByteToWideChar((n > 0 ? CP_UTF8 : CP_ACP), 0, s, -1, &w[0], n);
+        if (m > 0) w.resize((size_t)m - 1);
+    }
     return w;
 }
 
@@ -204,69 +221,79 @@ static inline SCRSDK::CrError call_SetSaveInfo(
 // ---- exports ----
 extern "C" {
 
-    // 원샷 AF: AF-ON Down→Up
+    // 원샷 AF: TrackingOnAndAFOn Down→Up
     __declspec(dllexport) int crsdk_one_shot_af(void* handle) {
         CamCtx* ctx = reinterpret_cast<CamCtx*>(handle);
         if (!ctx || !ctx->dev) return -2;
-        auto e = SCRSDK::SendCommand(ctx->dev,
-            SCRSDK::CrCommandId_TrackingOnAndAFOn,
-            SCRSDK::CrCommandParam_Down);
-        if (e != SCRSDK::CrError_None) return (int)e;
-        Sleep(150);
-        e = SCRSDK::SendCommand(ctx->dev,
-            SCRSDK::CrCommandId_TrackingOnAndAFOn,
-            SCRSDK::CrCommandParam_Up);
-        return (int)e;
+        using namespace SCRSDK;
+        CrError e1 = SendCommand(ctx->dev, (CrInt32u)CrCommandId_TrackingOnAndAFOn, CrCommandParam_Down);
+        Sleep(180);
+        CrError e2 = SendCommand(ctx->dev, (CrInt32u)CrCommandId_TrackingOnAndAFOn, CrCommandParam_Up);
+        if (e1 != CrError_None) return (int)e1;
+        if (e2 != CrError_None) return (int)e2;
+        return 0;
     }
 
-    // 원샷 AWB(보수적): 기종/헤더에 따라 미지원일 수 있음.
-    // → 미지원이면 음수 반환해서 상위(Python) 폴백 사용.
+    // 원샷 AWB: SDK에직접명령부재→미지원고정
     __declspec(dllexport) int crsdk_one_shot_awb(void* /*handle*/) {
-        // 안전 스텁: 현재 배포 헤더에 "Custom WB Capture" 계열 명령이 노출되지 않으면 미지원
-        // 실제 구현은 모델이 지원할 때 CrCommandId_CustomWBCapture* 또는
-        // WhiteBalance 관련 DP를 사용해 교정 트리거를 보내도록 확장.
+        // 안전 스텁: 헤더에 직접 명령 부재 시 미지원(-24)
         return -24; // not supported in this build
     }
 
-    // 다운로드 대상 폴더 지정 (예: "C:\\PhotoBox\\captures")
+    // 다운로드 기준 폴더만 별도 지정(호스트 스캔 기준)
     __declspec(dllexport) int crsdk_set_download_dir(const char* dir) {
-        g_download_dir = widen_from_acp(dir);
-        // 끝의 백슬래시 제거
-        if (!g_download_dir.empty() && g_download_dir.back() == L'\\')
-            g_download_dir.pop_back();
+        std::scoped_lock lk(g_dl_mu);
+        g_download_dir = to_wide(dir);
+        if (!g_download_dir.empty() && g_download_dir.back() == L'\\') g_download_dir.pop_back();
+        dlog(L"set_download_dir: %ls", g_download_dir.c_str());
+        return g_download_dir.empty() ? -2 : 0;
+    }
+
+    // 마지막 저장된 JPG 1개 반환(handle 미사용). 성공시 0, 경로 out_path(NUL 포함).
+    __declspec(dllexport) int crsdk_get_last_saved_jpeg(void* /*handle*/, wchar_t* out_path, unsigned cch) {
+        if (!out_path || cch == 0) return -2;
+        std::wstring base;
+        { std::scoped_lock lk(g_dl_mu); base = g_download_dir; }
+        if (base.empty()) { out_path[0] = 0; return -3; }
+
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        fs::path best_p;
+        fs::file_time_type best_t{};
+
+        for (auto it = fs::directory_iterator(base, ec); !ec && it != fs::end(it); it.increment(ec)) {
+            const fs::directory_entry& de = *it;
+            if (ec) break;
+            if (!de.is_regular_file(ec)) continue;
+            auto ext = de.path().extension().wstring();
+            for (auto& ch : ext) ch = (wchar_t)std::towlower(ch);
+            if (ext != L".jpg" && ext != L".jpeg") continue;
+            auto t = de.last_write_time(ec); if (ec) continue;
+            if (best_p.empty() || t > best_t) { best_p = de.path(); best_t = t; }
+        }
+
+        if (best_p.empty()) { out_path[0] = 0; return 1; }
+        wcsncpy_s(out_path, cch, best_p.c_str(), _TRUNCATE);
+        { std::scoped_lock lk(g_dl_mu); g_last_saved = best_p.wstring(); }
         return 0;
     }
 
-    // 지정 폴더에서 "가장 최근 .jpg" 경로 반환
-    __declspec(dllexport) int crsdk_get_last_saved_jpeg(void* /*handle*/, wchar_t* out_path, unsigned cch) {
-        if (!out_path || cch == 0) return -1;
-        out_path[0] = 0;
-        if (g_download_dir.empty()) return -2;
-
-        WIN32_FIND_DATAW fd{};
-        std::wstring pattern = g_download_dir + L"\\*.jpg";
-        HANDLE h = FindFirstFileW(pattern.c_str(), &fd);
-        if (h == INVALID_HANDLE_VALUE) return 1; // none
-
-        ULONGLONG best = 0;
-        std::wstring bestPath;
-        do {
-            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                ULARGE_INTEGER t{};
-                t.HighPart = fd.ftLastWriteTime.dwHighDateTime;
-                t.LowPart = fd.ftLastWriteTime.dwLowDateTime;
-                if (t.QuadPart > best) {
-                    best = t.QuadPart;
-                    bestPath = g_download_dir + L"\\" + fd.cFileName;
-                }
-            }
-        } while (FindNextFileW(h, &fd));
-        FindClose(h);
-
-        if (bestPath.empty()) return 1;
-        wcsncpy_s(out_path, cch, bestPath.c_str(), _TRUNCATE);
-        g_last_saved = bestPath;
-        return 0;
+    // 편의 래퍼: 카메라 저장 모드를 호스트(SAVE_MODE_HOST=2 가정)로 설정하고,
+    // 호스트 저장 폴더와 다운로드 기준 폴더를 동시에 지정한다.
+    __declspec(dllexport) int crsdk_preset_host_save_dir(void* handle, const char* host_dir_utf8) {
+        CamCtx* ctx = reinterpret_cast<CamCtx*>(handle);
+        if (!ctx || !ctx->dev) return -2;
+        const int SAVE_MODE_HOST = 2; // SDK의 Host 저장 모드 값 가정
+        // SetSaveInfo: host_dir만 지정, 파일명은 자동
+        SCRSDK::CrError er = call_SetSaveInfo(ctx->dev, host_dir_utf8, nullptr, (CrInt32)SAVE_MODE_HOST);
+        // 다운로드 기준 폴더 동기화
+        {
+            std::lock_guard<std::mutex> lk(g_dl_mu);
+            g_download_dir = to_wide(host_dir_utf8);
+            if (!g_download_dir.empty() && g_download_dir.back() == L'\\') g_download_dir.pop_back();
+        }
+        try { if (!g_download_dir.empty()) std::filesystem::create_directories(g_download_dir); } catch (...) {}
+        return (int)er;
     }
 
     __declspec(dllexport) void crsdk_set_debug(int on) { g_debug = on ? 1 : 0; }
@@ -663,6 +690,23 @@ extern "C" {
         if (out_rc_info) *out_rc_info = (unsigned)er_info;
         if (out_rc_img)  *out_rc_img = (unsigned)er_img;
         return (int)(er_img ? er_img : (er_info ? er_info : -3));
+    }
+
+    // 저장 폴더를 설정하고 호스트 저장 모드로 전환한다.
+    // - path: UTF-8 경로 문자열
+    // - 효과: SetSaveInfo(SAVE_MODE_HOST) 호출 + 다운로드 기준 폴더 동기화
+    __declspec(dllexport) int crsdk_set_save_dir(void* handle, const char* path) {
+        CamCtx* ctx = reinterpret_cast<CamCtx*>(handle);
+        if (!ctx || !ctx->dev) return -2;
+        int save_mode_host = 2; // 프로젝트규약값사용
+        int rc = (int)call_SetSaveInfo(ctx->dev, path, nullptr, (CrInt32)save_mode_host);
+        {
+            std::scoped_lock lk(g_dl_mu);
+            g_download_dir = to_wide(path);
+            if (!g_download_dir.empty() && g_download_dir.back() == L'\\') g_download_dir.pop_back();
+        }
+        dlog(L"set_save_dir: mode=%d path=%ls rc=%d", save_mode_host, g_download_dir.c_str(), rc);
+        return rc;
     }
 
 } // extern "C"
