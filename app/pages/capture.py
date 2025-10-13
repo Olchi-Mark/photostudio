@@ -241,17 +241,7 @@ class CapturePage(BasePage):
         self.ctrl = QWidget(self)
         hb = QHBoxLayout(self.ctrl); hb.setContentsMargins(0,0,0,0); hb.setSpacing(0); hb.setAlignment(Qt.AlignHCenter)
         self.cam_led = QLabel(self.ctrl); self.cam_led.setObjectName("CamLED"); hb.addWidget(self.cam_led, 0)
-        self.delay3 = QPushButton("3s", self.ctrl); self.delay3.setObjectName("Delay3"); self.delay3.setCheckable(True)
-        self.delay5 = QPushButton("5s", self.ctrl); self.delay5.setObjectName("Delay5"); self.delay5.setCheckable(True)
-        self.delay7 = QPushButton("7s", self.ctrl); self.delay7.setObjectName("Delay7"); self.delay7.setCheckable(True)
-        self.delay_group = QButtonGroup(self)
-        for i, b in ((3,self.delay3),(5,self.delay5),(7,self.delay7)): self.delay_group.addButton(b, i); hb.addWidget(b, 0)
-        self.delay_group.setExclusive(True); self.delay3.setChecked(True)
-        try: self.delay_group.idClicked.disconnect(self._on_delay_changed)
-        except Exception: pass
-        for b in (self.delay3, self.delay5, self.delay7):
-            try: b.setEnabled(False); b.setVisible(False)
-            except Exception: pass
+        # 지연 버튼(3/5/7초)은 생성하지 않는다(요구사항).
         self.btn_capture = QPushButton("Capture", self.ctrl); self.btn_capture.setObjectName("BtnCapture")
         self.btn_retake  = QPushButton("Retake", self.ctrl); self.btn_retake.setObjectName("BtnRetake")
         self.btn_capture.clicked.connect(self._on_capture_clicked)
@@ -802,14 +792,10 @@ class CapturePage(BasePage):
         except Exception: pass
         try:
             h = int(T.get("CTRL_H", CTRL_H))
-            for b in (self.delay3, self.delay5, self.delay7, self.btn_capture, self.btn_retake):
+                        for b in (self.btn_capture, self.btn_retake):
                 b.setFixedHeight(h)
-            self.delay3.setMinimumWidth(int(T.get("W_DELAY", 90)))
-            self.delay5.setMinimumWidth(int(T.get("W_DELAY", 90)))
-            self.delay7.setMinimumWidth(int(T.get("W_DELAY", 90)))
             self.btn_capture.setMinimumWidth(int(T.get("W_ACT", 150)))
             self.btn_retake.setMinimumWidth(int(T.get("W_ACT", 150)))
-        except Exception: pass
         thin = self._thin_px()
         # LED ?먰삎 + 怨좎젙?ш린
         try:
@@ -830,7 +816,7 @@ class CapturePage(BasePage):
             f"QPushButton#BtnCapture:pressed, QPushButton#BtnRetake:pressed {{ background:{primary}; color:white; }}"
             f"QPushButton#BtnCapture:disabled, QPushButton#BtnRetake:disabled {{ opacity:0.5; }}"
         )
-        try: self.ctrl.setStyleSheet(chip + act)
+        try: self.ctrl.setStyleSheet(act)
         except Exception: pass
         self._refresh_led()
 
@@ -1475,6 +1461,7 @@ class CapturePage(BasePage):
             except Exception: pass
             if callable(callback): QTimer.singleShot(0, callback)
         threading.Thread(target=_work, daemon=True).start()
+
 
 
 
