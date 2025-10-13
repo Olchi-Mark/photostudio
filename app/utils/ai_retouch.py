@@ -1,1184 +1,472 @@
-﻿# -*- coding: utf-8 -*-
-# app/utils/ai_retouch.py ??ID/Resume photo AI retouch pipeline (Tasks)
-# Spec: (3,4)=30횞40 ??Head 52??8%H, Top 6??0%H
-#       (7,9)=35횞45 ??Head 73??8%H, Top 6??%H
-# Pipeline: 1) Face roll align(head-only) ??2) Shoulder level(below chin)
-#           3) Eye-size balance(small-only) ??4) Crown&Chin estimate ??5) Spec crop ??6) Save
+﻿#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+?ъ쭊 ?꾩껜 ?뚯쟾(v2) + ?닿묠 ?섑룊 蹂댁젙 + ?뺤닔由??깅걹 鍮④컙???쒖떆瑜??섑뻾?쒕떎.
+???뚯씪? 湲곗〈 ?명꽣?섏씠??process_file ??瑜??좎??쒕떎.
+"""
 
 from __future__ import annotations
-from typing import Union, Tuple
-import os, math, cv2, threading, atexit
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
+import os, math, logging
+from typing import Tuple
+import cv2
+import numpy as np
 
+logger = logging.getLogger(__name__)
 
-RESPECT_EXIF_ORIENTATION = False
-# ?????????????????????????????????????????????
-# Debug
-# ?????????????????????????????????????????????
+# ?섍꼍 ?ㅼ쐞移??쒕떇媛?(湲곕낯媛??좎? 媛??
+_MAX_ROLL_DEG = float(os.environ.get("AI_MAX_ROLL_DEG", "2.0") or 2.0)   # ?쇨뎬 ?뚯쟾 理쒕? 媛곷룄(?덈?媛?
+_CROWN_ALPHA  = float(os.environ.get("AI_CROWN_ALPHA", "0.42") or 0.42)  # p10 湲곕컲 ?뺤닔由??ㅽ봽??鍮꾩쑉
+_ROLL_FLIP    = str(os.environ.get("AI_ROLL_FLIP", "0")).strip().lower() in ("1","true","yes")
 
-#Debug_mod: bool = True
-Debug_mod: bool = False
-DEBUG_POINTS_ONLY: bool = False   # ?먮쭔 李띻린 紐⑤뱶
-#DEBUG_POINTS_ONLY: bool = True
-DOT_R: int = 4                   # ?쇰컲 ?ъ씤??諛섏?由??쎌?)  ??2 ??4 濡??ㅼ?
-DOT_R_CROWN: int = 7             # crown/chin 媛뺤“ ???ш린
-
-from typing import Dict, Tuple, Any
-import json, os
-
-def _resolve_settings_path() -> str:
-    """Return the most appropriate settings.json path.
-
-    Priority order:
-      1) PHOTOBOX_SETTINGS_PATH env var (first existing path wins if multiple
-         paths are provided via os.pathsep).
-      2) Repository-local settings.json (project root).
-      3) Legacy Windows install location (C:\\PhotoBox\\settings.json).
-    """
-
-    # Collect candidates while preserving the defined priority.
-    candidates = []
-
-    env_path = os.environ.get("PHOTOBOX_SETTINGS_PATH", "").strip()
-    if env_path:
-        # Allow multiple paths separated by os.pathsep (e.g. "A;B" on Windows).
-        for item in env_path.split(os.pathsep):
-            item = item.strip()
-            if item:
-                candidates.append(item)
-
-    # Project-root settings.json (useful for tests/dev environment).
-    try:
-        here = os.path.abspath(__file__)
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(here)))
-        repo_settings = os.path.join(project_root, "settings.json")
-        candidates.append(repo_settings)
-    except Exception:
-        pass
-
-    # Legacy fallback that existing deployments rely on.
-    candidates.append(r"C:\\PhotoBox\\settings.json")
-
-    for path in candidates:
-        try:
-            if path and os.path.isfile(path):
-                return path
-        except Exception:
-            continue
-
-    # Last resort: legacy path (even if missing) to keep previous behaviour.
-    return r"C:\\PhotoBox\\settings.json"
-
-
-SETTINGS_PATH = _resolve_settings_path()
-
-DEFAULT_PROFILES: Dict[str, Dict[str, Tuple[float, float]]] = {
-    # 媛?대뱶 ?뷀뤃???⑥쐞: 鍮꾩쑉 0~1)
-    "3545": {"head_pct_range": (0.73, 0.78), "top_pct_range": (0.06, 0.08)},
-    "3040": {"head_pct_range": (0.52, 0.58), "top_pct_range": (0.06, 0.10)},
-}
-
-def _to_range01(v: Any) -> Tuple[float, float]:
-    """
-    ?낅젰 ?뺤떇 ?덉슜:
-      - [0.73, 0.78]  ?먮뒗 [73, 78]
-      - {"min": 73, "max": 78}  ?먮뒗 {"min":0.73,"max":0.78}
-    諛섑솚: (min01, max01)
-    """
-    if isinstance(v, dict):
-        a, b = v.get("min"), v.get("max")
-    elif isinstance(v, (list, tuple)) and len(v) == 2:
-        a, b = v[0], v[1]
-    else:
-        raise ValueError("invalid range")
-    a = float(a); b = float(b)
-    if a > 1.0 or b > 1.0:  # ?쇱꽱????鍮꾩쑉
-        a /= 100.0; b /= 100.0
-    if a > b:
-        a, b = b, a
-    a = max(0.0, min(1.0, a))
-    b = max(0.0, min(1.0, b))
-    return (a, b)
-
-def _load_profiles_from_file(path: str) -> Dict[str, Dict[str, Tuple[float, float]]]:
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    prof = data.get("profiles", {})
-    out: Dict[str, Dict[str, Tuple[float, float]]] = {}
-    for key in ("3040", "3545"):
-        if key in prof:
-            item = prof[key] or {}
-            head_src = item.get("head_pct", item.get("head_pct_range"))
-            top_src  = item.get("top_pct",  item.get("top_pct_range"))
-            if head_src is None or top_src is None:
-                continue
-            head_r = _to_range01(head_src)
-            top_r  = _to_range01(top_src)
-            out[key] = {"head_pct_range": head_r, "top_pct_range": top_r}
-    return out
-
-def _ratio_key_from_param(ratio: Any) -> str:
-    try:
-        if isinstance(ratio, dict) and 'ratio' in ratio:
-            ratio = ratio['ratio']
-        elif hasattr(ratio, 'ratio'):
-            ratio = getattr(ratio, 'ratio')
-    except Exception:
-        pass
-    if isinstance(ratio, (list, tuple)) and len(ratio) == 2:
-        try:
-            rw, rh = int(ratio[0]), int(ratio[1])
-            if (rw, rh) == (3, 4):
-                return '3040'
-            if (rw, rh) == (7, 9):
-                return '3545'
-            aspect = (rw / float(rh)) if rh else 0.0
-            return '3040' if abs(aspect - 0.75) < abs(aspect - 7/9) else '3545'
-        except Exception:
-            return '3545'
-    s = str(ratio).strip().lower()
-    if s in ('3040', '3545'):
-        return s
-    if '3x4' in s or '30x40' in s or '3*4' in s:
-        return '3040'
-    if '7x9' in s or '35x45' in s or '7*9' in s or '3.5x4.5' in s:
-        return '3545'
-    return '3545'
-
-def get_profile_spec(ratio: Any) -> Dict[str, float]:
-    """
-    ratio: 3040 ?먮뒗 3545(臾몄옄/?レ옄 紐⑤몢 ?덉슜)
-    諛섑솚:
-      head_pct_min, head_pct_max, top_pct_min, top_pct_max, head_target, top_target
-    """
-    key = _ratio_key_from_param(ratio)
-    profiles = DEFAULT_PROFILES.copy()
-    try:
-        if os.path.isfile(SETTINGS_PATH):
-            profiles.update(_load_profiles_from_file(SETTINGS_PATH))
-        else:
-            print(f"[settings] not found ??defaults: {SETTINGS_PATH}")
-    except Exception as e:
-        print(f"[settings] load error ??defaults: {e}")
-
-    if key not in profiles:
-        print(f"[settings] unknown ratio={key} ??fallback 3545")
-        key = "3545"
-
-    head_min, head_max = profiles[key]["head_pct_range"]
-    top_min,  top_max  = profiles[key]["top_pct_range"]
-    head_target = (head_min + head_max) * 0.5
-    top_target  = (top_min  + top_max)  * 0.5
-    return {
-        "head_pct_min": head_min, "head_pct_max": head_max,
-        "top_pct_min": top_min,   "top_pct_max": top_max,
-        "head_target": head_target, "top_target": top_target,
-    }
 
 # -----------------------
-# Fixed I/O via settings.json
+# ?대? ?좏떥
 # -----------------------
-def _json_load(path: str) -> dict:
+def _load_image(path: str) -> np.ndarray | None:
+    """?대?吏瑜?BGR(np.uint8)濡?濡쒕뱶?쒕떎."""
+    if not path:
+        return None
+    img = cv2.imread(path, cv2.IMREAD_COLOR)
+    return img
+
+
+def save_jpg_bgr(bgr: np.ndarray, path: str, quality: int = 100) -> bool:
+    """BGR ?대?吏瑜?JPEG濡???ν븳??"""
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-def _resolve_fixed_paths() -> Tuple[str, str]:
-    """Return (origin_path, ai_out_path) based on settings; fallback to defaults.
-    Defaults:
-      C:\\PhotoBox\\origin_photo.jpg -> C:\\PhotoBox\\ai_origin_photo.jpg
-    """
-    s = _json_load(SETTINGS_PATH)
-    paths = s.get("paths", {}) if isinstance(s, dict) else {}
-    origin = paths.get("origin", r"C:\\PhotoBox\\origin_photo.jpg")
-    ai_out = paths.get("ai_out", r"C:\\PhotoBox\\ai_origin_photo.jpg")
-    return origin, ai_out
-
-def _select_ratio_from_settings(default: str = "3545") -> Union[str, Tuple[int, int]]:
-    """Pick ratio key from settings.overlay.preset or fallback to default.
-    Returns "3040" or "3545". If ambiguous, return default.
-    """
-    s = _json_load(SETTINGS_PATH)
-    preset = ((s.get("overlay") or {}).get("preset") or "") if isinstance(s, dict) else ""
-    p = str(preset).lower()
-    if "35x45" in p or "3545" in p or "7x9" in p:
-        return "3545"
-    if "30x40" in p or "3040" in p or "3x4" in p:
-        return "3040"
-    return default
-def _collect_debug_points(rgb):
-    """?쇨뎬 478?ъ씤??媛?μ떆) + ?ъ쫰 二쇱슂?ъ씤???쇰?(肄? 洹, ?닿묠) ?쎌? 醫뚰몴 ?섏쭛"""
-    H, W = rgb.shape[:2]
-    pts = []
-
-    # 1) MediaPipe Tasks Face Landmarker
-    mp_face = _mp_face_landmarks(rgb)
-    if mp_face:
-        lms, _ = mp_face
-        pts.extend([(p.x * W, p.y * H) for p in lms])
-
-    # 2) Legacy FaceMesh fallback
-    if not pts:
-        try:
-            import mediapipe as mp
-            with mp.solutions.face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True) as fm:
-                res = fm.process(rgb)
-            if res.multi_face_landmarks:
-                lm = res.multi_face_landmarks[0].landmark
-                pts.extend([(p.x * W, p.y * H) for p in lm])
-        except Exception:
-            pass
-
-    # 3) Pose(?닿묠/肄?洹) ?쇰?
-    plms = _mp_pose_landmarks(rgb)
-    if plms:
-        for i in [0, 7, 8, 11, 12]:  # nose, L/R ear, L/R shoulder
-            try:
-                pts.append((plms[i].x * W, plms[i].y * H))
-            except Exception:
-                pass
-
-    # 4) 理쒗썑: ?쇨뎬 Haar bbox 紐⑥꽌由?4??
-    if not pts:
-        try:
-            face_cascade = EyeDetector._load_cascade('haarcascade_frontalface_default.xml')
-            import cv2
-            gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-            faces = face_cascade.detectMultiScale(gray, 1.2, 3) if face_cascade and not face_cascade.empty() else []
-            if len(faces) > 0:
-                x, y, w, h = max(faces, key=lambda r: r[2]*r[3])
-                pts += [(x, y), (x+w, y), (x, y+h), (x+w, y+h)]
-        except Exception:
-            pass
-
-    return pts
-
-
-class _DebugPointsRenderer:
-    def render(self, image: QImageLike) -> "QImage":
-        qi = _to_qimage(image)
-        if qi is None:
-            raise ValueError("DebugPointsRenderer: invalid image")
-
-        q = qi.convertToFormat(getattr(qi, "Format").Format_RGB888)
-        rgb = _rgb_from_qimage(q)
-
-        # 湲곕낯 ?ъ씤???쇨뎬 478 + ?ъ쫰 ?쇰? ??
-        pts = _collect_debug_points(rgb)
-
-        # crown/chin/eye_cx ?꾩텧?댁꽌 ?섍도? ?먥숈쑝濡?蹂꾨룄 ?쒖떆
-        crown_pt = chin_pt = eye_pt = None
-        try:
-            crown, chin, eye_cx, W, H, _ = CrownChinEstimator().estimate(qi, return_dbg=True)
-            crown_pt = (eye_cx, crown)
-            chin_pt  = (eye_cx, chin)
-            eye_pt   = (eye_cx, (crown+chin)//2)
-        except Exception:
-            pass
-
-        out = _draw_small_white_points(rgb, pts, radius=DOT_R)
-        # Ensure C-contiguous buffer before OpenCV drawing
-        try:
-            import numpy as np
-            out = out.copy(order="C") if hasattr(out, "copy") else out
-            out = np.ascontiguousarray(out)
-        except Exception:
-            pass
-
-        import cv2
-        for p in [crown_pt, chin_pt, eye_pt]:
-            if p is not None:
-                cv2.circle(out, (int(p[0]), int(p[1])), DOT_R_CROWN, (255, 255, 255), -1, cv2.LINE_AA)
-
-        n = len(pts) + (1 if crown_pt else 0) + (1 if chin_pt else 0) + (1 if eye_pt else 0)
-        print(f"[debug] points_only plotted: {n} pts (face/pose + crown/chin)")
-        return _qi_from_rgb_np(out)
-# -----------------------
-# Qt stubs (typing only)
-# -----------------------
-if TYPE_CHECKING:
-    from PySide6.QtGui import QImage, QPixmap  # typing only
-else:
-    class QImage:  # runtime stubs
-        pass
-    class QPixmap:
-        def toImage(self):
-            return QImage()
-
-QImageLike = Union["QImage", "QPixmap", str]
-
-# -----------------------
-# Model paths (Tasks)
-# -----------------------
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_MODEL_DIR = os.path.join(_THIS_DIR, "models")
-MODEL_FACE = os.path.join(_MODEL_DIR, "face_landmarker.task")
-MODEL_POSE = os.path.join(_MODEL_DIR, "pose_landmarker_full.task")
-
-# ---------------------------------------------------------------------------
-# Mediapipe Tasks singletons (stability: avoid repeated create/destroy)
-# ---------------------------------------------------------------------------
-_TASKS_DISABLE = bool(int(os.environ.get("AI_RETOUCH_DISABLE_TASKS", "0") or 0))
-_FACE_LOCK = threading.Lock()
-_POSE_LOCK = threading.Lock()
-_FACE_LM = None   # type: ignore[var-annotated]
-_POSE_LM = None   # type: ignore[var-annotated]
-
-def _close_tasks_singletons():
-    global _FACE_LM, _POSE_LM
-    try:
-        if _FACE_LM is not None and hasattr(_FACE_LM, "close"):
-            try: _FACE_LM.close()
-            except Exception: pass
-    finally:
-        _FACE_LM = None
-    try:
-        if _POSE_LM is not None and hasattr(_POSE_LM, "close"):
-            try: _POSE_LM.close()
-            except Exception: pass
-    finally:
-        _POSE_LM = None
-
-atexit.register(_close_tasks_singletons)
-
-# -----------------------
-# Spec ranges by ratio
-# -----------------------
-@dataclass
-class SpecRanges:
-    ratio: Tuple[int, int]                  # (W, H)
-    head_pct: Tuple[float, float]           # (chin - crown) / H
-    top_pct: Tuple[float, float]            # (crown - top) / H
-
-RATIO_PRESETS: Dict[Tuple[int, int], SpecRanges] = {
-    (3, 4): SpecRanges((3, 4), (0.52, 0.58), (0.06, 0.10)),  # 30횞40
-    (7, 9): SpecRanges((7, 9), (0.73, 0.78), (0.06, 0.08)),  # 35횞45
-}
-
-# -----------------------
-# QImage helpers
-# -----------------------
-def _qi_rgb888_format(_QImage):
-    try:
-        return _QImage.Format.Format_RGB888
-    except Exception:
-        return getattr(_QImage, "Format_RGB888")
-
-def _rgb_from_qimage(q: "QImage"):
-    # QImage ??writable C-contig RGB ndarray (HxWx3, uint8)
-    from PySide6.QtGui import QImage as _QImage
-    import numpy as np
-    q2 = q.convertToFormat(_qi_rgb888_format(_QImage))
-    w, h = q2.width(), q2.height()
-    bpl = q2.bytesPerLine()
-    ptr = q2.bits()
-    nbytes = h * bpl
-    try:
-        if hasattr(ptr, "setsize"):
-            ptr.setsize(nbytes); buf = bytes(ptr)
-        elif hasattr(ptr, "asstring"):
-            buf = ptr.asstring(nbytes)
-        else:
-            buf = ptr.tobytes()
-    except Exception:
-        buf = bytes(ptr)
-    arr = np.frombuffer(buf, dtype="uint8").reshape((h, bpl))[:, : w * 3]
-    rgb = arr.reshape(h, w, 3).copy()  # copy ??writeable
-    return rgb
-
-def _qi_from_rgb_np(arr: Any) -> "QImage":
-    import numpy as np
-    a = np.asarray(arr, dtype="uint8").copy(order="C")
-    h, w = a.shape[:2]
-    from PySide6.QtGui import QImage as _QImage
-    q = _QImage(a.data, w, h, 3 * w, _qi_rgb888_format(_QImage))
-    return q.copy()
-
-def _to_qimage(img: QImageLike) -> Optional["QImage"]:
-    try:
-        from PySide6.QtGui import QImage as _QImage, QPixmap as _QPixmap
-    except Exception:
-        _QImage = _QPixmap = None  # type: ignore
-    if _QImage is not None and isinstance(img, _QImage):
-        return img
-    if _QPixmap is not None and isinstance(img, _QPixmap):
-        return img.toImage()
-    if isinstance(img, str) and img:
-        # Try Qt -> OpenCV fallback
-        try:
-            from PySide6.QtGui import QPixmap as _PM
-            pm = _PM(img)
-            if hasattr(pm, "isNull") and not pm.isNull():
-                return pm.toImage()
-        except Exception:
-            pass
-        try:
-            bgr = cv2.imread(img, cv2.IMREAD_COLOR)
-            if bgr is None:
-                return None
-            rgb = bgr[:, :, ::-1]
-            return _qi_from_rgb_np(rgb)
-        except Exception:
-            return None
-    return None
-
-def save_jpg(img: "QImage", path: str, quality: int = 100) -> bool:
-    import os, cv2
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    try:
-        # Save only via OpenCV to strip EXIF rotation
-        bgr = _rgb_from_qimage(img)[:, :, ::-1].copy()
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         return bool(cv2.imwrite(path, bgr, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]))
-    except Exception:
+    except Exception as e:
+        logger.error("[save] ????ㅽ뙣: %s", e)
         return False
 
 
 # -----------------------
-# MediaPipe Tasks helpers
+# Face/pose 異붿젙 (mediapipe 媛꾩씠 ?ъ슜)
 # -----------------------
-def _mp_face_landmarks(rgb):
-    """return (lms(list[478]), bbox(x,y,w,h)) in pixels; None if fail"""
-    if _TASKS_DISABLE:
-        return None
+def _mp_face_mesh(bgr: np.ndarray):
+    """(?깃났) landmark list 諛섑솚, ?ㅽ뙣 ??None.
+    10(?대쭏 ?곷?), 152(?깅걹), 33/263(?덇?) ?ъ슜.
+    """
     try:
         import mediapipe as mp
-        from mediapipe.tasks.python import vision
-        from mediapipe.tasks.python.core.base_options import BaseOptions
-        H, W = rgb.shape[:2]
-        global _FACE_LM
-        if _FACE_LM is None:
-            with _FACE_LOCK:
-                if _FACE_LM is None:
-                    if not os.path.isfile(MODEL_FACE):
-                        return None
-                    opts = vision.FaceLandmarkerOptions(
-                        base_options=BaseOptions(model_asset_path=MODEL_FACE),
-                        running_mode=vision.RunningMode.IMAGE,
-                        num_faces=1,
-                        output_face_blendshapes=False,
-                        output_facial_transformation_matrixes=False,
-                    )
-                    _FACE_LM = vision.FaceLandmarker.create_from_options(opts)
-        if _FACE_LM is None:
-            return None
-        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        # Tasks objects are not documented as thread-safe; guard with lock
-        with _FACE_LOCK:
-            res = _FACE_LM.detect(mp_img)
-        if not res or not res.face_landmarks:
-            return None
-        lms = res.face_landmarks[0]
-        xs = [int(p.x * W) for p in lms]; ys = [int(p.y * H) for p in lms]
-        x1, x2 = max(0, min(xs)), min(W - 1, max(xs))
-        y1, y2 = max(0, min(ys)), min(H - 1, max(ys))
-        return lms, (x1, y1, max(1, x2 - x1), max(1, y2 - y1))
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        with mp.solutions.face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True) as fm:
+            res = fm.process(rgb)
+        if res.multi_face_landmarks:
+            return res.multi_face_landmarks[0].landmark
     except Exception:
         return None
+    return None
 
-def _mp_pose_landmarks(rgb):
-    """return list pose landmarks (33) or None"""
-    if _TASKS_DISABLE:
-        return None
+
+def _mp_pose(bgr: np.ndarray):
     try:
         import mediapipe as mp
-        from mediapipe.tasks.python import vision
-        from mediapipe.tasks.python.core.base_options import BaseOptions
-        global _POSE_LM
-        if _POSE_LM is None:
-            with _POSE_LOCK:
-                if _POSE_LM is None:
-                    if not os.path.isfile(MODEL_POSE):
-                        return None
-                    opts = vision.PoseLandmarkerOptions(
-                        base_options=BaseOptions(model_asset_path=MODEL_POSE),
-                        running_mode=vision.RunningMode.IMAGE,
-                        num_poses=1,
-                        min_pose_detection_confidence=0.35,
-                        min_pose_presence_confidence=0.35,
-                    )
-                    _POSE_LM = vision.PoseLandmarker.create_from_options(opts)
-        if _POSE_LM is None:
-            return None
-        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        with _POSE_LOCK:
-            res = _POSE_LM.detect(mp_img)
-        return res.pose_landmarks[0] if res and res.pose_landmarks else None
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        with mp.solutions.pose.Pose(static_image_mode=True) as pose:
+            res = pose.process(rgb)
+        if res.pose_landmarks:
+            return res.pose_landmarks.landmark
     except Exception:
         return None
+    return None
+
 
 # -----------------------
-# Eyes: detect + optional balance
+# Crown/Chin 異붿젙
 # -----------------------
-@dataclass
-class EyeBox:
-    cx: float; cy: float; w: float; h: float  # normalized
+def _head_profile_for_ratio(ratio: object | None) -> Tuple[float, float]:
+    """紐낆꽭 鍮꾩쑉???곕Ⅸ Head% 踰붿쐞瑜?諛섑솚?쒕떎."""
+    try:
+        if isinstance(ratio, (tuple, list)) and len(ratio) == 2:
+            rw, rh = int(ratio[0]), int(ratio[1])
+            key = '3040' if (rw, rh) == (3, 4) else '3545' if (rw, rh) == (7, 9) else '3545'
+        else:
+            s = str(ratio).strip().lower() if ratio else ''
+            key = '3040' if ('3040' in s or '3x4' in s) else '3545'
+    except Exception:
+        key = '3545'
+    if key == '3040':
+        return (0.52, 0.58)
+    return (0.73, 0.78)
 
-@dataclass
-class Eyes:
-    ok: bool
-    left: Optional[EyeBox] = None
-    right: Optional[EyeBox] = None
 
-class EyeDetector:
-    LIDX = [33, 133, 159, 145]   # left eye contour
-    RIDX = [263, 362, 386, 374]  # right eye
+def _edge_penalty(bgr: np.ndarray, x_center: int, y_cand: int) -> float:
+    """?곷떒 ?ㅽ듃?쇱씠???먯? ?鍮꾨줈 ?꾨낫 ?믪씠???⑤꼸?곕? 怨꾩궛?쒕떎."""
+    H, W = bgr.shape[:2]
+    x0 = max(0, x_center - int(0.04 * W)); x1 = min(W, x_center + int(0.04 * W))
+    if x1 <= x0:
+        return 0.0
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY).astype('float32')
+    stripe = gray[:, x0:x1]
+    top_band = max(2, int(0.06 * H))
+    bg = float(stripe[:top_band].mean())
+    diff = np.abs(stripe - bg).max(axis=1)
+    g = cv2.Sobel(stripe, cv2.CV_32F, 0, 1, ksize=3)
+    g_abs = np.abs(g).max(axis=1)
+    thr_d = max(8.0, float(diff[:top_band*2].mean() + 2*diff[:top_band*2].std()))
+    thr_g = max(8.0, float(g_abs[:top_band*2].mean() + 2*g_abs[:top_band*2].std()))
+    ys = (diff > thr_d) | (g_abs > thr_g)
+    idxs = np.nonzero(ys)[0]
+    if idxs.size == 0:
+        return 0.0
+    y_edge = int(idxs[0])
+    # ?꾨낫媛 ?먯?蹂대떎 吏?섏튂寃??????묒? y)硫??ш쾶 ?⑤꼸??    if y_cand < y_edge - 2:
+        return float((y_edge - y_cand) * 2.0)
+    # ?꾨낫媛 ?먯?蹂대떎 ?덈Т ?꾨옒硫??쏀븳 ?⑤꼸??    if y_cand > y_edge + 20:
+        return float((y_cand - (y_edge + 20)) * 0.2)
+    return 0.0
 
-    @staticmethod
-    def _load_cascade(name: str):
-        try:
-            cands = []
-            if hasattr(cv2, "data") and getattr(cv2.data, "haarcascades", None):
-                cands.append(cv2.data.haarcascades + name)
-            cands.append(os.path.join(os.path.dirname(cv2.__file__), "data", name))
-            cands.append(name)
-            for p in cands:
-                if os.path.exists(p):
-                    c = cv2.CascadeClassifier(p)
-                    if not c.empty():
-                        return c
-        except Exception:
-            return None
+
+def _estimate_crown_chin(bgr: np.ndarray, *, ratio: object | None = None) -> Tuple[int, int, int]:
+    """(?곸쓳?? ?뺤닔由??깅걹/?덉쨷?숈쓣 異붿젙?쒕떎."""
+    H, W = bgr.shape[:2]
+    lms = _mp_face_mesh(bgr)
+    if lms:
+        p10 = lms[10]; p152 = lms[152]; pL = lms[33]; pR = lms[263]
+        x_eye = int(np.clip(0.5 * (pL.x + pR.x) * W, 0, W - 1))
+        y_chin = int(np.clip(p152.y * H, 0, H - 1))
+
+        head_lo, head_hi = _head_profile_for_ratio(ratio)
+        head_mid = 0.5 * (head_lo + head_hi)
+
+        # ?꾨낫 alpha 洹몃━??媛쒖씤蹂??곸쓳)
+        alphas = [0.16, 0.20, 0.24, 0.28, 0.32, 0.36, float(_CROWN_ALPHA)]
+        best = None; best_score = 1e9
+        for a in alphas:
+            y_c = int(np.clip((p10.y + a * (p10.y - p152.y)) * H, 0, H - 1))
+            head_pct = (y_chin - y_c) / max(1.0, float(H))
+            # ?ㅼ퐫?? 紐낆꽭 以묒떖怨쇱쓽 嫄곕━ + ?ｌ? ?⑤꼸??            spec_cost = abs(head_pct - head_mid) * 100.0
+            edge_cost = _edge_penalty(bgr, x_eye, y_c)
+            score = spec_cost + edge_cost
+            if score < best_score:
+                best_score = score; best = (y_c, a)
+        y_crown, a_sel = best if best else (int(0.1*H), float(_CROWN_ALPHA))
+        logger.info("[crown] alpha_sel=%.3f score=%.2f y_crown=%d y_chin=%d x_eye_mid=%d", a_sel, best_score, y_crown, y_chin, x_eye)
+        return y_crown, y_chin, x_eye
+
+    # ?ъ쫰 湲곕컲 ??듭튂
+    pl = _mp_pose(bgr)
+    if pl:
+        nose = pl[0]; le = pl[7]; re = pl[8]
+        x_eye = int(np.clip(0.5 * (le.x + re.x) * W, 0, W - 1))
+        y_crown = int(np.clip((nose.y - 0.18) * H, 0, H - 1))
+        y_chin = int(np.clip((nose.y + 0.22) * H, 0, H - 1))
+        logger.info("[crown] pose-only y_crown=%d y_chin=%d x_eye_mid=%d", y_crown, y_chin, x_eye)
+        return y_crown, y_chin, x_eye
+    # ?ㅽ뙣 ??以묒븰媛?    yc, yn, xe = int(0.1 * H), int(0.8 * H), int(0.5 * W)
+    logger.info("[crown] fallback y_crown=%d y_chin=%d x_eye_mid=%d", yc, yn, xe)
+    return yc, yn, xe
+
+
+# -----------------------
+# ?뚯쟾(?꾩뿭) + ?닿묠 ?섑룊
+# -----------------------
+def _eye_roll_angle_deg(bgr: np.ndarray) -> float:
+    """醫?????湲곗슱湲?deg, ?쒓퀎?묒닔). ?ㅽ뙣 ??0."""
+    lms = _mp_face_mesh(bgr)
+    if not lms:
+        logger.info("[roll] eyes not found -> 0.0 deg")
+        return 0.0
+    L, R = lms[33], lms[263]
+    dx = (R.x - L.x); dy = (R.y - L.y)
+    logger.info("[roll] dx=%.5f dy=%.5f (y???꾨옒濡?利앷?)", dx, dy)
+    if abs(dx) < 1e-6:
+        logger.info("[roll] dx?? -> 0.0 deg")
+        return 0.0
+    ang_raw = -math.degrees(math.atan2(dy, dx))
+    ang = max(-_MAX_ROLL_DEG, min(_MAX_ROLL_DEG, ang_raw))
+    if _ROLL_FLIP:
+        ang = -ang
+        logger.info("[roll] flip enabled -> sign inverted")
+    logger.info("[roll] eyes angle raw=%.2f deg, clamp=%.2f deg", ang_raw, ang)
+    return ang
+
+
+def _face_center(bgr: np.ndarray) -> Tuple[int, int]:
+    """?쇨뎬 以묒떖(cx, cy)??諛섑솚?쒕떎. ?ㅽ뙣 ???대?吏 以묒떖."""
+    H, W = bgr.shape[:2]
+    lms = _mp_face_mesh(bgr)
+    if lms:
+        idxs = [10, 152, 33, 263]
+        xs = [lms[i].x for i in idxs]
+        ys = [lms[i].y for i in idxs]
+        cx = int(np.clip(sum(xs) / len(xs) * W, 0, W - 1))
+        cy = int(np.clip(sum(ys) / len(ys) * H, 0, H - 1))
+        return cx, cy
+    return int(W * 0.5), int(H * 0.5)
+
+
+# -----------------------
+# v1 ?ㅽ????뚯쟾(??以묒떖, ?묒? 媛곷룄 ?ㅽ궢, ?깅걹 x ?뺣젹)
+# -----------------------
+def _face_bbox_from_mesh(bgr: np.ndarray) -> Tuple[int,int,int,int] | None:
+    """
+    ?쇨뎬 ?쒕뱶留덊겕 ?꾩껜??諛붿슫??諛뺤뒪瑜??쎌? ?⑥쐞濡?諛섑솚?쒕떎.
+    ?ㅽ뙣 ??None.
+    """
+    H, W = bgr.shape[:2]
+    lms = _mp_face_mesh(bgr)
+    if not lms:
         return None
+    xs = [int(p.x * W) for p in lms]
+    ys = [int(p.y * H) for p in lms]
+    x1, x2 = max(0, min(xs)), min(W - 1, max(xs))
+    y1, y2 = max(0, min(ys)), min(H - 1, max(ys))
+    return (x1, y1, max(1, x2 - x1), max(1, y2 - y1))
 
-    def detect(self, image: QImageLike) -> Eyes:
-        qi = _to_qimage(image)
-        if qi is None:
-            return Eyes(False)
-        q = qi.convertToFormat(getattr(qi, "Format").Format_RGB888)
-        rgb = _rgb_from_qimage(q)
-        H, W = rgb.shape[:2]
 
-        # Tasks ?곗꽑
-        mp_res = _mp_face_landmarks(rgb)
-        if mp_res is not None:
-            lms, _ = mp_res
-            def box(idxs):
-                xs = [lms[i].x for i in idxs]; ys = [lms[i].y for i in idxs]
-                x1, x2 = max(0.0, min(xs)), min(1.0, max(xs))
-                y1, y2 = max(0.0, min(ys)), min(1.0, max(ys))
-                return EyeBox(cx=(x1 + x2) / 2, cy=(y1 + y2) / 2, w=(x2 - x1), h=(y2 - y1))
-            L, R = box(self.LIDX), box(self.RIDX)
-            if L.cx > R.cx: L, R = R, L
-            return Eyes(True, L, R)
+def _rotate_v1(bgr: np.ndarray) -> np.ndarray:
+    """
+    v1 洹쒖튃?쇰줈 ?뚯쟾?쒕떎.
+    - ??以묒떖???뚯쟾 異뺤쑝濡??ъ슜?쒕떎.
+    - 媛곷룄??짹15째濡??쒗븳?섍퀬, 0.8째 誘몃쭔?대㈃ ?ㅽ궢?쒕떎.
+    - ?뚯쟾 ???깅걹??x媛 ?쇨뎬 bbox 以묒떖 x???ㅻ룄濡??섑룊 ?대룞 蹂댁젙?쒕떎.
+    """
+    H, W = bgr.shape[:2]
+    lms = _mp_face_mesh(bgr)
+    if not lms:
+        logger.info("[v1] face landmarks ?놁쓬 -> ?뚯쟾 ?ㅽ궢")
+        return bgr
+    L, R = lms[33], lms[263]
+    dx, dy = (R.x - L.x), (R.y - L.y)
+    if abs(dx) < 1e-6:
+        logger.info("[v1] dx?? -> ?ㅽ궢")
+        return bgr
+    ang_raw = -math.degrees(math.atan2(dy, dx))
+    ang = max(-15.0, min(15.0, ang_raw))
+    if abs(ang) < 0.8:
+        logger.info("[v1] |angle|<0.8째 -> ?ㅽ궢")
+        return bgr
 
-        # Legacy FaceMesh
-        try:
-            import mediapipe as mp
-            with mp.solutions.face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True) as fm:
-                res = fm.process(rgb)
-            if res.multi_face_landmarks:
-                lm = res.multi_face_landmarks[0].landmark
-                def box2(idxs):
-                    xs = [lm[i].x for i in idxs]; ys = [lm[i].y for i in idxs]
-                    x1, x2 = max(0.0, min(xs)), min(1.0, max(xs))
-                    y1, y2 = max(0.0, min(ys)), min(1.0, max(ys))
-                    return EyeBox(cx=(x1+x2)/2, cy=(y1+y2)/2, w=(x2-x1), h=(y2-y1))
-                L, R = box2(self.LIDX), box2(self.RIDX)
-                if L.cx > R.cx: L, R = R, L
-                return Eyes(True, L, R)
-        except Exception:
-            pass
+    # ?뚯쟾 以묒떖: ???덉쓽 以묒젏
+    cx = int(0.5 * (L.x + R.x) * W)
+    cy = int(0.5 * (L.y + R.y) * H)
 
-        # Haar ?대갚
-        face_cascade = self._load_cascade('haarcascade_frontalface_default.xml')
-        eye_cascade  = self._load_cascade('haarcascade_eye_tree_eyeglasses.xml')
-        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-        faces = []
-        if face_cascade is not None and not face_cascade.empty():
-            try: faces = face_cascade.detectMultiScale(gray, 1.2, 3)
-            except Exception: faces = []
-        if len(faces) > 0:
-            fx, fy, fw, fh = max(faces, key=lambda r: r[2]*r[3])
-        else:
-            fx = fy = 0; fw = W; fh = H
-        roi = gray[fy:fy+fh, fx:fx+fw]
-        eyes = []
-        if eye_cascade is not None and not eye_cascade.empty():
-            try: eyes = eye_cascade.detectMultiScale(roi, 1.2, 3)
-            except Exception: eyes = []
-        if len(eyes) < 1: return Eyes(False)
-        eyes = sorted(eyes, key=lambda r: (r[1], -r[2]))[:2]
-        infos = []
-        for (ex, ey, ew, eh) in eyes:
-            ex += fx; ey += fy
-            infos.append(EyeBox(cx=(ex+ew/2)/W, cy=(ey+eh/2)/H, w=ew/W, h=eh/H))
-        infos.sort(key=lambda e: e.cx)
-        if len(infos) == 1: return Eyes(True, infos[0], None)
-        return Eyes(True, infos[0], infos[-1])
+    # ?쇨뎬 bbox 諛??깅걹 ?꾩튂
+    fb = _face_bbox_from_mesh(bgr) or (0, 0, W, H)
+    fx, fy, fw, fh = fb
+    chin = lms[152]
+    chin_x, chin_y = float(chin.x * W), float(chin.y * H)
 
-class EyeBalancer:
-    """?묒? 履쎈쭔 ?뺤옣(異뺤냼 湲덉?), 理쒕? +20%"""
-    def adjust(self, image: QImageLike, strength: float = 0.45, *, enable: bool = True) -> "QImage":
-        qi = _to_qimage(image)
-        if qi is None or not enable:
-            return qi if isinstance(image, QImage) else image  # type: ignore
-        import numpy as np
-        det = EyeDetector().detect(qi)
-        if not det.ok or det.left is None or det.right is None:
-            return qi
+    # ?뚯쟾 + ?섑룊 蹂댁젙(trans_dx)
+    # ?붿껌: ?뚯쟾 遺?몃? 諛섎?濡??곸슜
+    M = cv2.getRotationMatrix2D((float(cx), float(cy)), float(-ang), 1.0)
+    x_rot = float(M[0,0]*chin_x + M[0,1]*chin_y + M[0,2])
+    desired_cx = float(fx + fw * 0.5)
+    trans_dx = float(desired_cx - x_rot)
+    M[0,2] = float(M[0,2] + trans_dx)
 
-        L, R = det.left, det.right
-        q = qi.convertToFormat(getattr(qi, "Format").Format_RGB888)
-        H, W = q.height(), q.width()
-        rgb = _rgb_from_qimage(q)
+    rot = cv2.warpAffine(bgr, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    logger.info("[v1] rotate(sign-flip) %.2f째 center=(%d,%d) trans_dx=%.1f bbox_cx=%.1f", -ang, cx, cy, trans_dx, desired_cx)
+    return rot
 
-        print(f"[eyes] before  L(w{L.w:.3f},h{L.h:.3f})  R(w{R.w:.3f},h{R.h:.3f})")
 
-        def grow_only(s, b):
-            if s <= 1e-8 or b <= 1e-8: return 1.0
-            gap = (b / s) - 1.0
-            g = 1.0 + max(0.0, min(0.20, strength * gap))
-            return float(min(1.20, max(1.0, g)))
+def _rotate_global(bgr: np.ndarray, angle_deg: float, center: Tuple[int, int]) -> np.ndarray:
+    H, W = bgr.shape[:2]
+    M = cv2.getRotationMatrix2D(center, angle_deg, 1.0)
+    rot = cv2.warpAffine(bgr, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    return rot
 
-        if (L.w * L.h) <= (R.w * R.h):
-            sxL, syL, sxR, syR = grow_only(L.w, R.w), grow_only(L.h, R.h), 1.0, 1.0
-            smaller = "L"
-        else:
-            sxL, syL, sxR, syR = 1.0, 1.0, grow_only(R.w, L.w), grow_only(R.h, L.h)
-            smaller = "R"
 
-        def warp_eye(p: EyeBox, sx: float, sy: float, img):
-            if abs(sx - 1.0) < 1e-3 and abs(sy - 1.0) < 1e-3: return img
-            cx, cy = int(p.cx * W), int(p.cy * H)
-            rx, ry = int(max(8, p.w * W * 1.45)), int(max(8, p.h * H * 1.45))
-            M = np.array([[sx, 0, (1 - sx) * cx], [0, sy, (1 - sy) * cy]], np.float32)
-            layer = cv2.warpAffine(img, M, (W, H), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
-            m = np.zeros((H, W), np.uint8)
-            cv2.ellipse(m, (cx, cy), (rx, ry), 0, 0, 360, 255, -1, cv2.LINE_AA)
-            m = cv2.GaussianBlur(m, (0, 0), max(2.0, min(rx, ry) * 0.30)).astype("float32") / 255.0
-            return (layer * m[..., None] + img * (1 - m[..., None])).astype("uint8")
+def _level_shoulders(bgr: np.ndarray) -> np.ndarray:
+    """?닿묠 ?섑룊(媛꾩씠): Pose 11-12 湲곗슱湲곕쭔???꾨떒(shear), ???꾨옒留??곸슜."""
+    H, W = bgr.shape[:2]
+    pl = _mp_pose(bgr)
+    if not pl:
+        logger.info("[shoulder] pose ?놁쓬 -> skip")
+        return bgr
+    L, R = pl[11], pl[12]
+    xL, yL = L.x * W, L.y * H
+    xR, yR = R.x * W, R.y * H
+    # 湲곗슱湲??묒닔=?ㅻⅨ履??닿묠媛 ?꾨옒)
+    slope_deg = math.degrees(math.atan2((yR - yL), (xR - xL + 1e-6)))
+    if abs(slope_deg) < 1.0:
+        logger.info("[shoulder] 寃쎌궗 ?묒쓬 -> skip")
+        return bgr
+    m = -math.tan(math.radians(slope_deg))
+    m = float(max(-0.14, min(0.14, m)))  # ?덉쟾 罹?    # ?깆꽑 洹쇱쿂瑜?寃쎄퀎濡??꾨옒留??꾨떒
+    y_crown, y_chin, _ = _estimate_crown_chin(bgr)
+    y_seam = int(min(H - 1, max(y_chin + int(H * 0.01), int(max(yL, yR) + H * 0.02))))
+    M = np.array([[1.0, m, -m * y_seam], [0.0, 1.0, 0.0]], np.float32)
+    sh = cv2.warpAffine(bgr, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    # 寃쎄퀎 留덉뒪????0~??1)
+    band = max(12, int(H * 0.05))
+    y0 = max(0, y_seam - band)
+    mask = np.zeros((H, 1), np.float32)
+    if y0 < y_seam:
+        ramp = np.linspace(0.0, 1.0, y_seam - y0, dtype=np.float32)
+        mask[y0:y_seam, 0] = ramp
+    mask[y_seam:, 0] = 1.0
+    mask = np.repeat(mask, W, axis=1)
+    out = (sh * mask[..., None] + bgr * (1.0 - mask[..., None])).astype("uint8")
+    logger.info("[shoulder] slope_deg=%.2f m=%.4f y_seam=%d band=%d", slope_deg, m, y_seam, band)
+    return out
 
-        out = rgb.copy()
-        out = warp_eye(L, sxL, syL, out)
-        out = warp_eye(R, sxR, syR, out)
-        print(f"[eyes] scales  smaller={smaller}  L??sx{sxL:.3f},sy{syL:.3f})  R??sx{sxR:.3f},sy{syR:.3f})")
-        return _qi_from_rgb_np(out)
+
+def _draw_red_dots(bgr: np.ndarray, crown_y: int, chin_y: int, cx: int, r: int = 12) -> np.ndarray:
+    out = bgr.copy()
+    cv2.circle(out, (int(cx), int(crown_y)), int(r), (0, 0, 255), -1, cv2.LINE_AA)
+    cv2.circle(out, (int(cx), int(chin_y)), int(r), (0, 0, 255), -1, cv2.LINE_AA)
+    return out
+
 
 # -----------------------
-# Face roll align (head-only)
+# ???ш린 議곗젅(?묒? ?덈쭔 ?뺣?)
 # -----------------------
-class FaceRollAligner:
-    def align(self, image: QImageLike, *, mode: str = "local") -> "QImage":
-        qi = _to_qimage(image)
-        if qi is None:
-            return image  # type: ignore[return-value]
-        import numpy as np
-        q = qi.convertToFormat(getattr(qi, "Format").Format_RGB888)
-        rgb = _rgb_from_qimage(q)
-        H, W = rgb.shape[:2]
+def _eyes_from_facemesh(bgr: np.ndarray):
+    lms = _mp_face_mesh(bgr)
+    if not lms:
+        return None
+    H, W = bgr.shape[:2]
+    LIDX = [33, 133, 159, 145]
+    RIDX = [263, 362, 386, 374]
+    def box(idxs):
+        xs = [lms[i].x for i in idxs]; ys = [lms[i].y for i in idxs]
+        x1, x2 = max(0.0, min(xs)), min(1.0, max(xs))
+        y1, y2 = max(0.0, min(ys)), min(1.0, max(ys))
+        cx = (x1 + x2) * 0.5; cy = (y1 + y2) * 0.5; w = (x2 - x1); h = (y2 - y1)
+        return (cx, cy, w, h)
+    L = box(LIDX); R = box(RIDX)
+    # ?뺣젹: L????긽 ?쇱そ
+    if L[0] > R[0]:
+        L, R = R, L
+    return L, R, (W, H)
 
-        # eyes slope ??angle (遺?? ?ㅻⅨ履??덉씠 ??쑝硫?+dy ??-罐)
-        ed = EyeDetector().detect(qi)
-        angle = 0.0
-        if ed.ok and ed.left and ed.right:
-            dx = ed.right.cx - ed.left.cx
-            dy = ed.right.cy - ed.left.cy
-            if abs(dx) > 1e-6:
-                angle = -math.degrees(math.atan2(dy, dx))
-        # 怨쇰룄 ?뚯쟾 蹂댄샇
-        max_rot = 15.0
-        angle = max(-max_rot, min(max_rot, angle))
-        if abs(angle) < 0.8:
-            print(f"[pose] roll_face?? ??skip")
-            return qi
 
-        # crown/chin
-        crown, chin, _, _, _ = CrownChinEstimator().estimate(qi)
+def _adjust_eyes(bgr: np.ndarray, *, strength: float = 0.45, enable: bool = True) -> np.ndarray:
+    if not enable:
+        return bgr
+    res = _eyes_from_facemesh(bgr)
+    if not res:
+        return bgr
+    (cxL, cyL, wL, hL), (cxR, cyR, wR, hR), (W, H) = res
+    # 硫댁쟻 湲곗? ?묒? ?덈쭔 ?뺣?, 理쒕? +20%
+    areaL, areaR = wL * hL, wR * hR
+    if areaL <= 1e-6 or areaR <= 1e-6:
+        return bgr
+    grow = 1.0
+    # ?뚯뒪??紐⑤뱶: ?묒? 履쎌쓣 臾댁“嫄?+50% ?뺣?
+    if areaL < areaR:
+        grow = 1.0 + min(0.05, max(0.0, strength * gap))
+        target = ('L', cxL, cyL, wL, hL)
+    else:
+        grow = 1.0 + min(0.05, max(0.0, strength * gap))
+        target = ('R', cxR, cyR, wR, hR)
+    if abs(grow - 1.0) < 1e-3:
+        return bgr
+    tag, cx, cy, w, h = target
+    cx_px, cy_px = int(cx * W), int(cy * H)
+    rx, ry = int(max(8, w * W * 1.45)), int(max(8, h * H * 1.45))
+    # ?뺣? ?됰젹(以묒떖 湲곗?)
+    M = np.array([[grow, 0.0, (1 - grow) * cx_px], [0.0, grow, (1 - grow) * cy_px]], np.float32)
+    layer = cv2.warpAffine(bgr, M, (W, H), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
+    # ???留덉뒪?щ줈 釉붾젋??    m = np.zeros((H, W), np.uint8)
+    cv2.ellipse(m, (cx_px, cy_px), (rx, ry), 0, 0, 360, 255, -1, cv2.LINE_AA)
+    m = cv2.GaussianBlur(m, (0, 0), max(2.0, min(rx, ry) * 0.30)).astype('float32') / 255.0
+    out = (layer * m[..., None] + bgr * (1.0 - m[..., None])).astype('uint8')
+    logger.info("[eyes] target=%s grow=%.3f center=(%d,%d) rx=%d ry=%d", tag, grow, cx_px, cy_px, rx, ry)
+    return out
 
-        # ?뚯쟾 以묒떖: ?쇨뎬 bbox ?놁쓣 ?뚮뒗 crown~chin 湲곕컲 異붿젙
-        fb = None
-        mp = _mp_face_landmarks(rgb)
-        if mp is not None:
-            _, fb = mp
-        if fb is None:
-            fx, fy, fw, fh = 0, int(max(0, crown - (chin - crown)*1.1)), W, int((chin - crown)*2.0)
-        else:
-            fx, fy, fw, fh = fb
-        cx = int(fx + fw * 0.5); cy = int(fy + fh * 0.45)
-
-        # ?뚯쟾 ?덉씠??
-        apply_angle = -float(angle)
-        M = cv2.getRotationMatrix2D((float(cx), float(cy)), apply_angle, 1.0)
-        rot = cv2.warpAffine(rgb, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
-
-        # ?쇨뎬 ???留덉뒪??+ ???뚯?(??4px~??22px: 1?? 媛먯뇿)
-        rx = int(fw * 0.60); ry = int(fh * 0.65)
-        m = np.zeros((H, W), np.float32)
-        cv2.ellipse(m, (cx, cy), (max(8, rx), max(8, ry)), 0, 0, 360, 1.0, -1, cv2.LINE_AA)
-        y0 = int(max(0, chin - 4)); y1 = int(min(H - 1, chin + 10))
-        if y1 > y0:
-            ramp = np.linspace(1.0, 0.0, y1 - y0, dtype=np.float32)
-            m[y0:y1, :] *= ramp[:, None]
-        if y1 < H:
-            m[y1:, :] = 0.0
-        m = cv2.GaussianBlur(m, (0, 0), 9)
-
-        out = (rot * m[..., None] + rgb * (1.0 - m[..., None])).astype("uint8")
-        print(f"[pose] local rotate {apply_angle:+.2f}째 (chin={chin} hinge=[{y0},{y1}))")
-        return _qi_from_rgb_np(out)
 
 # -----------------------
-# Crown & chin estimation
+# 鍮꾩쑉 ?щ∼(紐낆꽭: 3040, 3545)
 # -----------------------
-class CrownChinEstimator:
-    def estimate(self, image: QImageLike, *, return_dbg: bool = False):
-        """Return (crown_y, chin_y, eye_cx, W, H)  [Debug_mod/return_dbg=True?대㈃ + dbg_pts]"""
-        qi = _to_qimage(image)
-        if qi is None:
-            raise ValueError("CrownChinEstimator.estimate: invalid image")
-        import numpy as np
-        q = qi.convertToFormat(getattr(qi, "Format").Format_RGB888)
-        rgb = _rgb_from_qimage(q)
-        H, W = rgb.shape[:2]
-
-        dbg_pts = []
-
-        y_crown = None; y_chin = None; x_eye_mid = W//2
-        # 1) Legacy FaceMesh ??landmark id ?댁슜(?뺣?)
-        try:
-            import mediapipe as mp
-            with mp.solutions.face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True) as fm:
-                res = fm.process(rgb)
-            if res.multi_face_landmarks:
-                lm = res.multi_face_landmarks[0].landmark
-                def px(i): return (lm[i].x * W, lm[i].y * H)
-                for i in [10, 152, 33, 263]:
-                    x, y = px(i)
-                    if 0 <= x < W and 0 <= y < H: dbg_pts.append((x, y))
-                p10  = np.array(px(10), dtype=float)
-                p152 = np.array(px(152), dtype=float)
-                eyeL = np.array(px(33), dtype=float)
-                eyeR = np.array(px(263), dtype=float)
-                x_eye_mid = int(np.clip(0.5*(eyeL[0]+eyeR[0]), 0, W-1))
-                v_up = p10 - p152
-                alpha = 0.24
-                est = p10 + alpha * v_up
-                y_crown = float(np.clip(est[1], 0, H-1))
-                y_chin  = float(np.clip(p152[1], 0, H-1))
-        except Exception:
-            y_crown = None
-
-        # 2) Pose ?대갚
-        if y_crown is None or y_chin is None:
-            lms = _mp_pose_landmarks(rgb)
-            if lms:
-                def P(i): return (lms[i].x*W, lms[i].y*H)
-                nose = np.array(P(0)); le = np.array(P(7)); re = np.array(P(8))
-                ls   = np.array(P(11)); rs = np.array(P(12))
-                for p in (nose, le, re, ls, rs):
-                    x, y = p
-                    if 0 <= x < W and 0 <= y < H: dbg_pts.append((x, y))
-                m  = 0.5*(le+re); s = 0.5*(ls+rs)
-                u  = m - s; nu = np.linalg.norm(u) or 1.0; u /= nu
-                d1 = np.linalg.norm(m - nose); d2 = np.linalg.norm(le - re)
-                scale = 0.8*d1 + 0.5*d2
-                c = m + 1.0*scale*u
-                y_crown = float(np.clip(c[1], 0, H-1))
-                y_chin  = float(np.clip((nose + 1.6*(nose-s))[1], 0, H-1))
-                x_eye_mid = int(np.clip(m[0], 0, W-1))
-
-        # 3) ?곷떒 ?ｌ? 誘몄꽭 蹂댁젙(??諛곌꼍 媛??
-        try:
-            lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)
-            L = lab[...,0].astype("float32")
-            half = max(1, int(0.05 * W))
-            x0, x1 = max(0, x_eye_mid - half), min(W, x_eye_mid + half)
-            stripe = L[:, x0:x1]
-            top_band_h = max(1, int(0.06 * H))
-            bg = stripe[:top_band_h].mean()
-            diff = abs(stripe - bg).max(axis=1)
-            g = cv2.Sobel(stripe, cv2.CV_32F, 0, 1, ksize=3)
-            g_abs = abs(g).max(axis=1)
-            thr_d = max(8.0, diff[:top_band_h*2].mean() + 2*diff[:top_band_h*2].std())
-            thr_g = max(8.0, g_abs[:top_band_h*2].mean() + 2*g_abs[:top_band_h*2].std())
-            ys = (diff > thr_d) | (g_abs > thr_g)
-            idxs = ys.nonzero()[0]
-            if idxs.size:
-                y_edge = int(idxs[0])
-                if y_crown is None or y_edge < y_crown + 6:
-                    y_crown = float(y_edge)
-        except Exception:
-            pass
-
-        # 4) Haar 理쒗썑 ?대갚
-        if y_crown is None or y_chin is None:
-            try:
-                face_cascade = EyeDetector._load_cascade('haarcascade_frontalface_default.xml')
-                gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-                faces = []
-                if face_cascade is not None and not face_cascade.empty():
-                    try: faces = face_cascade.detectMultiScale(gray, 1.2, 3)
-                    except Exception: faces = []
-                if faces:
-                    fx, fy, fw, fh = max(faces, key=lambda r: r[2]*r[3])
-                    dbg_pts += [(fx,fy),(fx+fw,fy),(fx,fy+fh),(fx+fw,fy+fh)]
-                    y_crown = float(max(0, int(fy - fh * 0.18)))
-                    y_chin  = float(min(H-1, int(fy + fh * 0.92)))
-            except Exception:
-                pass
-
-        # Finalize with NaN-safe fallback and clamp
-        try:
-            yc = float(y_crown) if y_crown is not None else 0.0
-        except Exception:
-            yc = 0.0
-        try:
-            yn = float(y_chin) if y_chin is not None else (0.65 * H)
-        except Exception:
-            yn = 0.65 * H
-        if not (isinstance(yc, float) and math.isfinite(yc)):
-            yc = 0.0
-        if not (isinstance(yn, float) and math.isfinite(yn)):
-            yn = 0.65 * H
-        y_crown = int(max(0, min(H-1, int(yc))))
-        y_chin  = int(max(0, min(H-1, int(yn))))
-        print(f"[crown] y_crown={y_crown} y_chin={y_chin} x_eye_mid={x_eye_mid}")
-
-        if return_dbg and Debug_mod:
-            return y_crown, y_chin, int(x_eye_mid), W, H, dbg_pts
-        return y_crown, y_chin, int(x_eye_mid), W, H
-
-# -----------------------
-# Shoulder leveling (horizontal shear, below chin)
-# -----------------------
-class ShoulderLeveler:
-    def level(self, image: QImageLike, *, strength: float = 1.0, max_deg: float = 8.0) -> "QImage":
-        qi = _to_qimage(image)
-        if qi is None:
-            return image  # type: ignore[return-value]
-        import cv2, numpy as np, math
-        q = qi.convertToFormat(getattr(qi, "Format").Format_RGB888)
-        rgb = _rgb_from_qimage(q)
-        H, W = rgb.shape[:2]
-
-        lms = _mp_pose_landmarks(rgb)
-        if not lms:
-            print("[shoulder] no pose ??skip")
-            return qi
-
-        def P(i): return (lms[i].x * W, lms[i].y * H)
-        xL, yL = P(11); xR, yR = P(12)
-        if xL > xR: xL, xR, yL, yR = xR, xL, yR, yL
-
-        slope = float(math.degrees(math.atan2((yR - yL), (xR - xL))))
-        if abs(slope) < 1.2:
-            print("[shoulder] slope?? ??skip")
-            return qi
-
-        crown, chin, _, _, _ = CrownChinEstimator().estimate(qi)
-        y_seam = int(min(H-1, max(chin + int(H * 0.01), max(int(yL), int(yR)) + int(H * 0.02))))
-
-        m_req = -math.tan(math.radians(slope))
-        m = float(max(-math.tan(math.radians(max_deg)), min(math.tan(math.radians(max_deg)), m_req*max(0.0, min(1.0, strength)))))
-        # Limit over-correction with a shear cap (safety)
-        SHEAR_CAP = 0.14  # approx tan(8째)
-        if m > SHEAR_CAP:
-            m = SHEAR_CAP
-        elif m < -SHEAR_CAP:
-            m = -SHEAR_CAP
-
-        # x' = x + m*(y - y0)  ??y0=y_seam???뺥솗???ъ슜
-        M = np.array([[1.0, m, -m * y_seam], [0.0, 1.0, 0.0]], np.float32)
-        sheared = cv2.warpAffine(rgb, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
-
-        band = max(12, int(H * 0.05)); y0 = max(0, y_seam - band)
-        mask = np.zeros((H, 1), np.float32)
-        if y0 < y_seam:
-            ramp = np.linspace(0.0, 1.0, y_seam - y0, dtype=np.float32)
-            mask[y0:y_seam, 0] = ramp
-        mask[y_seam:, 0] = 1.0
-        mask = np.repeat(mask, W, axis=1)
-        out = (sheared * mask[..., None] + rgb * (1.0 - mask[..., None])).astype("uint8")
-        print(f"[shoulder] slope={slope:+.2f}째 seam_y={y_seam} m={m:+.5f}")
-        return _qi_from_rgb_np(out)
-
-# -----------------------
-# Spec crop using crown & chin
-# -----------------------
-# -----------------------
-# Spec crop using crown & chin  (PATCHED)
-# -----------------------
-class SpecCropper:
-    """紐낆꽭(Head%, Top%)??留욎떠 ?대?吏瑜??щ∼?쒕떎."""
-    def crop(self, image: QImageLike, *, ratio: Union[Tuple[int,int], str]=(3,4)) -> "QImage":
-        """鍮꾩쑉(ratio)??留욎떠 Crown/Chin 異붿젙媛믪쑝濡?理쒖쥌 ?щ∼???섑뻾?쒕떎."""
-        qi = _to_qimage(image)
-        if qi is None:
-            return image  # type: ignore[return-value]
-        q = qi.convertToFormat(getattr(qi, "Format").Format_RGB888)
-        rgb = _rgb_from_qimage(q)
-
-        est = CrownChinEstimator().estimate(qi, return_dbg=Debug_mod)
-        if Debug_mod:
-            crown, chin, eye_cx, W, H, dbg_pts = est
-            rgb = _draw_small_white_points(rgb, dbg_pts)
-            print(f"[debug] mesh points plotted: {len(dbg_pts)}")
-        else:
-            crown, chin, eye_cx, W, H = est
-
-        # ----- ratio ??醫낇슒鍮?寃곗젙 -----
-        ratio_key: str
-        if isinstance(ratio, str):
-            ratio_key = ratio
-            aspect = 3/4 if ratio_key == "3040" else 7/9 if ratio_key == "3545" else 7/9
-        else:
-            rw, rh = ratio
-            aspect = rw / float(rh)
+def _profile_spec(ratio: object | None) -> Tuple[float, float, float, float, float]:
+    """(head_lo, head_hi, top_lo, top_hi, aspect) 諛섑솚."""
+    key = '3545'
+    try:
+        if isinstance(ratio, (tuple, list)) and len(ratio) == 2:
+            rw, rh = int(ratio[0]), int(ratio[1])
             if (rw, rh) == (3, 4):
-                ratio_key = "3040"
+                key = '3040'
             elif (rw, rh) == (7, 9):
-                ratio_key = "3545"
+                key = '3545'
             else:
-                # 醫낇슒鍮꾨줈 異붿젙
-                ratio_key = "3040" if abs(aspect - 0.75) < abs(aspect - 7/9) else "3545"
+                key = '3040' if abs(rw / max(1.0, float(rh)) - 0.75) < abs(rw / max(1.0, float(rh)) - 7/9) else '3545'
+        else:
+            s = str(ratio).strip().lower() if ratio else ''
+            if '3040' in s or '3x4' in s:
+                key = '3040'
+            else:
+                key = '3545'
+    except Exception:
+        key = '3545'
+    if key == '3040':
+        return (0.52, 0.58, 0.06, 0.10, 3/4)
+    return (0.73, 0.78, 0.06, 0.08, 7/9)
 
-        # ----- settings.json ?곸슜(?ㅽ뙣 ???뷀뤃?? -----
-        prof = get_profile_spec(ratio_key)
-        head_lo, head_hi = prof["head_pct_min"], prof["head_pct_max"]
-        top_lo,  top_hi  = prof["top_pct_min"],  prof["top_pct_max"]
 
-        import numpy as np, cv2
-        head_span = max(1, chin - crown)
-
-        # 1) crop_h 寃곗젙(Head% 湲곗?)
-        Hmin  = head_span / float(head_hi)
-        Hmax  = head_span / float(head_lo)
-        Hgeom = min(H, int(W / aspect))
-        crop_h = int(round(min(max(0.5 * (Hmin + min(Hmax, Hgeom)), 1.0), max(Hgeom, 1))))
-        crop_w = int(round(crop_h * aspect))
-
-        # 2) Top% 以묒븰媛믪쑝濡?諛곗튂
-        t_target = 0.5 * (top_lo + top_hi)
-        x_tgt = int(round(eye_cx - crop_w * 0.5))
-        y_tgt = int(round(crown - t_target * crop_h))
-
-        # 3) ?⑤뵫(?곗깋)
-        pad_top    = max(0, -y_tgt)
-        pad_bottom = max(0, (y_tgt + crop_h) - H)
-        pad_left   = max(0, -x_tgt)
-        pad_right  = max(0, (x_tgt + crop_w) - W)
-        if pad_top or pad_bottom or pad_left or pad_right:
-            rgb = cv2.copyMakeBorder(rgb, pad_top, pad_bottom, pad_left, pad_right,
-                                     borderType=cv2.BORDER_CONSTANT, value=(255, 255, 255))
-            H += pad_top + pad_bottom; W += pad_left + pad_right
-            crown += pad_top; chin += pad_top; eye_cx += pad_left
-            x_tgt += pad_left; y_tgt += pad_top
-            print(f"[crop] padded t/b/l/r = {pad_top},{pad_bottom},{pad_left},{pad_right}")
-
-        # 4) 理쒖쥌 ?щ∼
-        x = max(0, min(W - crop_w, x_tgt))
-        y = max(0, min(H - crop_h, y_tgt))
-        crop = np.ascontiguousarray(rgb[y:y+crop_h, x:x+crop_w])
-
-        act_head = head_span / float(crop_h)
-        act_top  = (crown - y) / float(crop_h)
-        print(f"[crop] ratio_key={ratio_key} rect=({x},{y},{crop_w},{crop_h}) "
-              f"Head%={act_head:.3f} target[{head_lo:.2f},{head_hi:.2f}] "
-              f"Top%={act_top:.3f} target[{top_lo:.2f},{top_hi:.2f}]")
-        return _qi_from_rgb_np(crop)
+def _spec_crop(bgr: np.ndarray, *, ratio: object | None = '3545') -> np.ndarray:
+    H, W = bgr.shape[:2]
+    head_lo, head_hi, top_lo, top_hi, aspect = _profile_spec(ratio)
+    yc, yn, xeye = _estimate_crown_chin(bgr, ratio=ratio)
+    head_span = max(1, int(yn - yc))
+    head_target = 0.5 * (head_lo + head_hi)
+    crop_h = int(round(head_span / max(1e-6, head_target)))
+    crop_w = int(round(crop_h * aspect))
+    # top target 湲곗??쇰줈 y ?곗젙, x???덉쨷??湲곗? 以묒븰 諛곗튂
+    top_target = 0.5 * (top_lo + top_hi)
+    x_tgt = int(round(xeye - crop_w * 0.5))
+    y_tgt = int(round(yc - top_target * crop_h))
+    # ?⑤뵫(?곗깋) ?꾩슂 ??異붽?
+    pad_top    = max(0, -y_tgt)
+    pad_bottom = max(0, (y_tgt + crop_h) - H)
+    pad_left   = max(0, -x_tgt)
+    pad_right  = max(0, (x_tgt + crop_w) - W)
+    if pad_top or pad_bottom or pad_left or pad_right:
+        bgr = cv2.copyMakeBorder(bgr, pad_top, pad_bottom, pad_left, pad_right, borderType=cv2.BORDER_CONSTANT, value=(255,255,255))
+        H += pad_top + pad_bottom; W += pad_left + pad_right
+        yc += pad_top; yn += pad_top; xeye += pad_left
+        x_tgt += pad_left; y_tgt += pad_top
+        logger.info("[crop] padded t/b/l/r = %d,%d,%d,%d", pad_top, pad_bottom, pad_left, pad_right)
+    x = max(0, min(W - crop_w, x_tgt))
+    y = max(0, min(H - crop_h, y_tgt))
+    crop = np.ascontiguousarray(bgr[y:y+crop_h, x:x+crop_w])
+    act_head = head_span / float(crop_h)
+    act_top  = (yc - y) / float(crop_h)
+    logger.info("[crop] ratio=%s rect=(%d,%d,%d,%d) Head%%=%.3f target[%.2f,%.2f] Top%%=%.3f target[%.2f,%.2f]",
+                str(ratio), x, y, crop_w, crop_h, act_head, head_lo, head_hi, act_top, top_lo, top_hi)
+    return crop
 
 
 # -----------------------
-# Pipeline
-# -----------------------
-class RetouchPipeline:
-    """濡??뺣젹?믪뼱源??섑룊?믩늿 洹좏삎?믩챸???щ∼ ?쒖쑝濡?泥섎━?쒕떎."""
-    def __init__(self) -> None:
-        self.face = FaceRollAligner()
-        self.shoulder = ShoulderLeveler()
-        self.eyes = EyeBalancer()
-        self.cropper = SpecCropper()
-
-    def apply(
-        self,
-        img: QImageLike,
-        *,
-        ratio: Union[Tuple[int,int], str] = (7,9),
-        face_align_mode: str = "local",
-        shoulder_strength: float = 1.0,
-        eye_balance: bool = True,
-    ) -> "QImage":
-        """?낅젰 ?대?吏瑜??뚯씠?꾨씪?몄뿉 ?곕씪 蹂댁젙?섍퀬 理쒖쥌 ?대?吏瑜?諛섑솚?쒕떎."""
-        qi = _to_qimage(img)
-        if qi is None:
-            raise ValueError("RetouchPipeline.apply: invalid image")
-
-        # ???먮쭔 李띻린 紐⑤뱶: ?섎㉧吏 ?④퀎 ?꾨? ?ㅽ궢?섍퀬 諛붾줈 醫낅즺
-        if DEBUG_POINTS_ONLY:
-            print("[debug] DEBUG_POINTS_ONLY=True ??skip face/shoulder/eyes/crop")
-            return _DebugPointsRenderer().render(qi)
-
-        # (?꾨옒???뺤긽 ?뚯씠?꾨씪?? ?꾩옱 紐⑤뱶?먯꽑 ?ㅽ뻾?섏? ?딆쓬)
-        q1 = self.face.align(qi, mode=face_align_mode)
-        q2 = self.shoulder.level(q1, strength=shoulder_strength)
-        q3 = self.eyes.adjust(q2, strength=0.4, enable=eye_balance)
-        q4 = self.cropper.crop(q3, ratio=ratio)
-        return q4
-
-# -----------------------
-# File entry (?몄텧遺? ?명솚 ?좎?)
+# Public API
 # -----------------------
 def process_file(
     in_path: str,
     out_path: str,
     *,
-    ratio: Union[Tuple[int,int], str] = (3,4),   # "3040" / "3545" ?먮뒗 (3,4)/(7,9)
-    face_align_mode: str = "local",
-    shoulder_strength: float = 1.0,
-    eye_balance: bool = False,
+    ratio: object | None = None,               # ?명솚???좎?(?뺤닔由??곸쓳 ?ㅼ퐫?댁뿉 ?ъ슜)
+    face_align_mode: str = "global",
+    shoulder_strength: float = 1.0,            # ?명솚???좎????꾩옱 誘몄꽭 ?곹뼢 ?놁쓬)
+    eye_balance: bool = False,                 # ?명솚???좎???誘몄궗??
+    **kwargs,
 ) -> bool:
-    try:
-        print(f"[retouch] start: {in_path} ??{out_path}")
-        qi = _to_qimage(in_path)
-        if qi is None:
-            print("[retouch] load fail")
-            return False
-        q = RetouchPipeline().apply(
-            qi,
-            ratio=ratio,
-            face_align_mode=face_align_mode,
-            shoulder_strength=shoulder_strength,
-            eye_balance=eye_balance,
-        )
-        ok = save_jpg(q, out_path, 100)
-        print(f"[retouch] done ok={ok}")
-        return bool(ok)
-    except Exception as e:
-        print(f"[retouch] error: {e}")
-        return False
+    """?ъ쭊 ?꾩껜 ?뚯쟾(??湲곗슱湲? 짹2째) ???닿묠 ?섑룊 蹂댁젙. ?뺤닔由??깅걹 鍮④컙???쒖떆.
 
-
-def process_fixed_paths(*, ratio_default: str = "3545",
-                        face_align_mode: str = "local",
-                        shoulder_strength: float = 1.0,
-                        eye_balance: bool = False) -> bool:
-    """Process using fixed input/output from settings.json.
-    - Input:  paths.origin (fallback C:\\PhotoBox\\origin_photo.jpg)
-    - Output: paths.ai_out (fallback C:\\PhotoBox\\ai_origin_photo.jpg)
-    - Ratio:  overlay.preset heuristic ??"3040"|"3545"; fallback ratio_default
-    Safe fallback: on failure, copies input to output when possible.
+    - ratio, eye_balance ??異붽? ?ㅼ썙?쒕뒗 怨쇨굅 ?명꽣?섏씠???명솚???꾪빐 諛쏄퀬 臾댁떆?쒕떎.
     """
-    in_path, out_path = _resolve_fixed_paths()
-    ratio = _select_ratio_from_settings(ratio_default)
     try:
-        print(f"[retouch] fixed start: {in_path} -> {out_path} ratio={ratio}")
-        qi = _to_qimage(in_path)
-        if qi is None:
-            print("[retouch] load fail (fixed)")
-            # still attempt fallback copy if input exists
-            if os.path.isfile(in_path):
-                try:
-                    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-                    import shutil
-                    shutil.copy2(in_path, out_path)
-                    print("[retouch] fallback copy (fixed)")
-                    return True
-                except Exception:
-                    pass
+        bgr = _load_image(in_path)
+        if bgr is None:
+            logger.error("[retouch] 濡쒕뱶 ?ㅽ뙣: %s", in_path)
             return False
-        q = RetouchPipeline().apply(
-            qi,
-            ratio=ratio,
-            face_align_mode=face_align_mode,
-            shoulder_strength=shoulder_strength,
-            eye_balance=eye_balance,
-        )
-        ok = save_jpg(q, out_path, 100)
-        if not ok and os.path.isfile(in_path):
-            try:
-                os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-                import shutil
-                shutil.copy2(in_path, out_path)
-                print("[retouch] fallback copy (save fail)")
-                return True
-            except Exception:
-                pass
-        print(f"[retouch] fixed done ok={ok}")
+        H, W = bgr.shape[:2]
+        # v1 ?ㅽ????뚯쟾?쇰줈 蹂寃???以묒떖, 짹15째, 0.8째 ?ㅽ궢, ?깅걹 x ?뺣젹)
+        rot = _rotate_v1(bgr)
+        out = _level_shoulders(rot)
+        # ???ш린 洹좏삎(?묒? ?덈쭔 ?뺣?)
+        out = _adjust_eyes(out, strength=0.45, enable=True)
+        # 鍮꾩쑉 ?щ∼
+        out = _spec_crop(out, ratio=ratio)
+        # ?щ∼???대?吏?먯꽌 ?뺤닔由????ъ텛???????쒖떆
+        # 정수리/턱 점 오버레이 제거(표시 안 함)
+        # yc, yn, xeye = _estimate_crown_chin(out, ratio=ratio)
+        # out = _draw_red_dots(out, yc, yn, xeye, r=12)
+        ok = save_jpg_bgr(out, out_path, 100)
         return bool(ok)
     except Exception as e:
-        print(f"[retouch] fixed error: {e}")
-        # fallback copy on error
-        try:
-            if os.path.isfile(in_path):
-                os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-                import shutil
-                shutil.copy2(in_path, out_path)
-                print("[retouch] fallback copy (exception)")
-                return True
-        except Exception:
-            pass
+        logger.error("[retouch] 泥섎━ ?ㅽ뙣: %s", e)
         return False
-
-
-def process_fixed_paths_session(ratio_code: Optional[str] = None,
-                                *,
-                                face_align_mode: str = "local",
-                                shoulder_strength: float = 1.0,
-                                eye_balance: bool = False) -> bool:
-    """Process fixed I/O with explicit session ratio string.
-    - Input:  C:\\PhotoBox\\origin_photo.jpg (or settings.paths.origin)
-    - Output: C:\\PhotoBox\\ai_origin_photo.jpg (or settings.paths.ai_out)
-    - Ratio:  ratio_code in {"3040","3545"}; default to "3545" if missing/invalid.
-    Safe fallback: on any failure, copy input to output if possible.
-    """
-    in_path, out_path = _resolve_fixed_paths()
-    ratio_key = str(ratio_code).strip() if ratio_code else "3545"
-    if ratio_key not in ("3040", "3545"):
-        ratio_key = "3545"
-    try:
-        print(f"[retouch] fixed(session) start: {in_path} -> {out_path} ratio={ratio_key}")
-        qi = _to_qimage(in_path)
-        if qi is None:
-            print("[retouch] load fail (fixed/session)")
-            if os.path.isfile(in_path):
-                try:
-                    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-                    import shutil
-                    shutil.copy2(in_path, out_path)
-                    print("[retouch] fallback copy (fixed/session)")
-                    return True
-                except Exception:
-                    pass
-            return False
-        q = RetouchPipeline().apply(
-            qi,
-            ratio=ratio_key,
-            face_align_mode=face_align_mode,
-            shoulder_strength=shoulder_strength,
-            eye_balance=eye_balance,
-        )
-        ok = save_jpg(q, out_path, 100)
-        if not ok and os.path.isfile(in_path):
-            try:
-                os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-                import shutil
-                shutil.copy2(in_path, out_path)
-                print("[retouch] fallback copy (save fail, fixed/session)")
-                return True
-            except Exception:
-                pass
-        print(f"[retouch] fixed(session) done ok={ok}")
-        return bool(ok)
-    except Exception as e:
-        print(f"[retouch] fixed(session) error: {e}")
-        try:
-            if os.path.isfile(in_path):
-                os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-                import shutil
-                shutil.copy2(in_path, out_path)
-                print("[retouch] fallback copy (exception, fixed/session)")
-                return True
-        except Exception:
-            pass
-        return False
-
-def process_photobox_session(session_ratio: str = "3545") -> bool:
-    in_p  = r"C:\PhotoBox\origin_photo.jpg"
-    out_p = r"C:\PhotoBox\ai_origin_photo.jpg"
-    return process_file(in_p, out_p, ratio=session_ratio)
-
-
 

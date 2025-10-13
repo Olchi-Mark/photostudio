@@ -1,11 +1,11 @@
-"""
-app/ui/ai_overlay.py — 안정화 버전(페인터 정규화)
-역할: 라이브뷰 위에 가이드/마스크/랜드마크를 그리는 오버레이 위젯
+﻿"""
+app/ui/ai_overlay.py ???덉젙??踰꾩쟾(?섏씤???뺢퇋??
+??븷: ?쇱씠釉뚮럭 ?꾩뿉 媛?대뱶/留덉뒪???쒕뱶留덊겕瑜?洹몃━???ㅻ쾭?덉씠 ?꾩젽
 
-규칙
-- paintEvent 내부에서는 QPainter 변수 `qp`만 사용한다.
-- paintEvent 중 geometry/show/update 호출 금지(깜빡임·재진입 방지).
-- 보조 그리기 함수는 새 QPainter를 만들지 않고 전달받은 `qp`만 사용한다.
+洹쒖튃
+- paintEvent ?대??먯꽌??QPainter 蹂??`qp`留??ъ슜?쒕떎.
+- paintEvent 以?geometry/show/update ?몄텧 湲덉?(源쒕묀?꽷룹옱吏꾩엯 諛⑹?).
+- 蹂댁“ 洹몃━湲??⑥닔????QPainter瑜?留뚮뱾吏 ?딄퀬 ?꾨떖諛쏆? `qp`留??ъ슜?쒕떎.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout
 
 
 class OverlayCanvas(QWidget):
-    """카메라 프리뷰 위에 가이드를 그리는 페인트 전용 위젯."""
+    """移대찓???꾨━酉??꾩뿉 媛?대뱶瑜?洹몃━???섏씤???꾩슜 ?꾩젽."""
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
@@ -34,7 +34,7 @@ class OverlayCanvas(QWidget):
             "dash_color": (204, 204, 204, 255),
             "dash_width": 1,
             "show_guide": False,
-            # 랜드마크 색상
+            # ?쒕뱶留덊겕 ?됱긽
             "pt_core": (46, 125, 50, 230),
             "pt_chin": (76, 175, 80, 230),
             "pt_eye": (3, 169, 244, 230),
@@ -47,19 +47,19 @@ class OverlayCanvas(QWidget):
         self._dbg_cross: bool = False
         self._badge_text: str = ""
 
-    # 설정/토큰 ----------------------------------------------------------------
+    # ?ㅼ젙/?좏겙 ----------------------------------------------------------------
     def refresh_tokens(self, TOK: dict) -> None:
-        """토큰 값 적용 후 리페인트 요청."""
+        """?좏겙 媛??곸슜 ??由ы럹?명듃 ?붿껌."""
         self._TOK.update(TOK or {})
         self.update()
 
     def set_debug_cross(self, enable: bool) -> None:
-        """디버그 십자선 표시 토글."""
+        """?붾쾭洹???옄???쒖떆 ?좉?."""
         self._dbg_cross = bool(enable)
         self.update()
 
     def set_mask_color(self, rgb=(255, 255, 255), alpha: int = 26) -> None:
-        """마스크 색상을 설정한다(QColor 또는 (r,g,b))."""
+        """留덉뒪???됱긽???ㅼ젙?쒕떎(QColor ?먮뒗 (r,g,b))."""
         if isinstance(rgb, QColor):
             c = rgb
             self._TOK["mask_color"] = (c.red(), c.green(), c.blue(), c.alpha())
@@ -70,36 +70,36 @@ class OverlayCanvas(QWidget):
         self.update()
 
     def set_badge(self, text: str) -> None:
-        """오버레이 상단 배지 문구 설정."""
+        """?ㅻ쾭?덉씠 ?곷떒 諛곗? 臾멸뎄 ?ㅼ젙."""
         self._badge_text = str(text or "")
         self.update()
 
-    # 랜드마크 -----------------------------------------------------------------
+    # ?쒕뱶留덊겕 -----------------------------------------------------------------
     def clear_landmarks(self) -> None:
-        """랜드마크/정규화 플래그 초기화."""
+        """?쒕뱶留덊겕/?뺢퇋???뚮옒洹?珥덇린??"""
         self._lm_payload = None
         self._lm_normalized = False
         self.update()
 
     def set_landmarks(self, payload: dict, normalized: bool = False) -> None:
-        """랜드마크/정규화 플래그 설정."""
+        """?쒕뱶留덊겕/?뺢퇋???뚮옒洹??ㅼ젙."""
         self._lm_payload = payload or None
         self._lm_normalized = bool(normalized)
         self.update()
 
-    # 비율/홀 ------------------------------------------------------------------
+    # 鍮꾩쑉/? ------------------------------------------------------------------
     def set_ratio(self, w: int, h: int) -> None:
-        """가이드 비율을 설정한다."""
+        """媛?대뱶 鍮꾩쑉???ㅼ젙?쒕떎."""
         if w > 0 and h > 0:
             self._ratio = (int(w), int(h))
             self.update()
 
     def set_hole_rect(self, rect: Optional[QRectF]) -> None:
-        """프리뷰 영역(hole) 사각형을 설정한다."""
+        """?꾨━酉??곸뿭(hole) ?ш컖?뺤쓣 ?ㅼ젙?쒕떎."""
         self._hole_rect = rect
         self.update()
 
-    # 유틸 ---------------------------------------------------------------------
+    # ?좏떥 ---------------------------------------------------------------------
     def _rgba(self, tup: Tuple[int, int, int, int]) -> QColor:
         r, g, b, a = tup
         return QColor(int(r), int(g), int(b), int(a))
@@ -111,7 +111,7 @@ class OverlayCanvas(QWidget):
         return QPointF(hole.left() + x, hole.top() + y)
 
     def _paint_landmarks(self, qp: QPainter, hole: QRectF) -> None:
-        """랜드마크를 qp로 그린다(새 페인터 생성 금지)."""
+        """?쒕뱶留덊겕瑜?qp濡?洹몃┛?????섏씤???앹꽦 湲덉?)."""
         payload = self._lm_payload or {}
         normalized = self._lm_normalized
 
@@ -142,9 +142,9 @@ class OverlayCanvas(QWidget):
         else:
             draw_pts(core, self._TOK.get("pt_core"), 3)
 
-    # 페인트 -------------------------------------------------------------------
+    # ?섏씤??-------------------------------------------------------------------
     def paintEvent(self, ev) -> None:  # noqa
-        """qp 하나만 사용. paint 중 geometry/show/update 호출 금지."""
+        """qp ?섎굹留??ъ슜. paint 以?geometry/show/update ?몄텧 湲덉?."""
         qp = QPainter()
         if not qp.begin(self):
             return
@@ -154,7 +154,7 @@ class OverlayCanvas(QWidget):
             except Exception:
                 pass
 
-            # 필요 시 hole만 갱신(geometry 변경은 paint에서 금지)
+            # ?꾩슂 ??hole留?媛깆떊(geometry 蹂寃쎌? paint?먯꽌 湲덉?)
             try:
                 if hasattr(self, "_recalc_hole_from_widget"):
                     self._recalc_hole_from_widget()
@@ -175,10 +175,10 @@ class OverlayCanvas(QWidget):
                 y = (H - target_h) // 2
                 guide_rect = QRectF(x, y, target_w, target_h)
 
-            # 마스크 채우기(가이드 제외)
+            # 留덉뒪??梨꾩슦湲?媛?대뱶 ?쒖쇅)
             mc = self._TOK.get("mask_color", (238, 238, 238, 255))
             hole = self._hole_rect
-            # 구멍(hole)이 유효하지 않으면 아무 것도 그리지 않는다(기본 투명)
+            # 援щ찉(hole)???좏슚?섏? ?딆쑝硫??꾨Т 寃껊룄 洹몃━吏 ?딅뒗??湲곕낯 ?щ챸)
             if hole is None or hole.width() <= 0 or hole.height() <= 0:
                 return
             outer = QPainterPath()
@@ -193,7 +193,7 @@ class OverlayCanvas(QWidget):
             outer.setFillRule(Qt.OddEvenFill)
             qp.fillPath(outer, self._rgba(mc))
 
-            # 가이드 사각형(옵션)
+            # 媛?대뱶 ?ш컖???듭뀡)
             if bool(self._TOK.get("show_guide", False)):
                 gc = self._TOK.get("guide_color", (255, 255, 255, 180))
                 dashed = bool(self._TOK.get("dash_guide", False))
@@ -214,7 +214,7 @@ class OverlayCanvas(QWidget):
                 else:
                     qp.drawRect(guide_rect)
 
-            # 디버그 십자선(옵션)
+            # ?붾쾭洹???옄???듭뀡)
             if self._dbg_cross:
                 center = guide_rect.center()
                 pen = QPen(self._rgba((255, 0, 0, 255)))
@@ -223,16 +223,17 @@ class OverlayCanvas(QWidget):
                 qp.drawLine(center.x() - 24, center.y(), center.x() + 24, center.y())
                 qp.drawLine(center.x(), center.y() - 24, center.x(), center.y() + 24)
 
-            # 랜드마크
+            # ?쒕뱶留덊겕
             if self._lm_payload:
                 self._paint_landmarks(qp, guide_rect)
 
-            # 배지 텍스트
-            if self._badge_text:
+            # 諛곗? ?띿뒪??            if self._badge_text:
                 pen = QPen(QColor(255, 255, 255, 230))
                 pen.setWidth(1)
                 qp.setPen(pen)
-                qp.drawText(guide_rect.adjusted(8, 8, -8, -8), Qt.AlignLeft | Qt.AlignTop, self._badge_text)
+                align = Qt.AlignCenter if bool(self._TOK.get("badge_center", False)) else (Qt.AlignLeft | Qt.AlignTop)
+                # 배지를 정확히 중앙에 두기 위해 패딩을 제거한다.
+                qp.drawText((QRectF(self._hole_rect) if (self._hole_rect is not None and self._hole_rect.width() > 0 and self._hole_rect.height() > 0) else guide_rect).adjusted(0, 0, 0, 0), align, self._badge_text)
         except Exception as ex:
             print("[OV] paint error:", ex)
         finally:
@@ -241,7 +242,7 @@ class OverlayCanvas(QWidget):
 
 
 class AiOverlay(QWidget):
-    """캡처 페이지에서 사용하는 오버레이 래퍼 위젯(안정화)."""
+    """罹≪쿂 ?섏씠吏?먯꽌 ?ъ슜?섎뒗 ?ㅻ쾭?덉씠 ?섑띁 ?꾩젽(?덉젙??."""
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("AiOverlay")
@@ -256,7 +257,7 @@ class AiOverlay(QWidget):
         self._hole_shrink = 0
         self._hole_rect: Optional[QRectF] = None
 
-    # capture.py에서 기대하는 API ------------------------------------------------
+    # capture.py?먯꽌 湲곕??섎뒗 API ------------------------------------------------
     def refresh_tokens(self, tok: dict) -> None:
         self._overlay.refresh_tokens(tok or {})
 
@@ -284,14 +285,22 @@ class AiOverlay(QWidget):
     def update_landmarks(self, payload: dict, normalized: bool = False) -> None:
         self._overlay.set_landmarks(payload, normalized)
 
-    # 내부 유틸 ------------------------------------------------------------------
+    def set_debug_cross(self, enable: bool) -> None:
+        """중앙 십자 디버그 표시를 켠다/끈다."""
+        self._overlay.set_debug_cross(enable)
+
+    def set_badge_center(self, on: bool = True) -> None:
+        """배지 텍스트를 중앙 정렬로 표시한다."""
+        self._overlay.refresh_tokens({"badge_center": bool(on)})
+
+    # ?대? ?좏떥 ------------------------------------------------------------------
+    # 바인딩된 위젯의 좌표를 오버레이 좌표로 변환하여 홀 사각형을 갱신한다.
     def _recalc_hole_from_widget(self) -> None:
         try:
             if self._hole_widget is not None:
                 w = self._hole_widget
                 r = w.geometry()
-                # 전역 좌표로 변환 후, 오버레이 좌표로 역변환
-                g_tl = w.mapToGlobal(r.topLeft())
+                # ?꾩뿭 醫뚰몴濡?蹂???? ?ㅻ쾭?덉씠 醫뚰몴濡??????                g_tl = w.mapToGlobal(r.topLeft())
                 g_br = w.mapToGlobal(r.bottomRight())
                 tl = self.mapFromGlobal(g_tl)
                 br = self.mapFromGlobal(g_br)
@@ -299,11 +308,25 @@ class AiOverlay(QWidget):
                 rect = QRect(tl, br)
                 s = int(self._hole_shrink or 0)
                 if s > 0:
-                    rect.adjust(s, s, -s, -s)
+                                    rect.adjust(s, s, -s, -s)
+                # 오프셋 보정: 기본 -2px, 환경변수 PS_HOLE_OFF로 오버라이드
+                try:
+                    import os as _os
+                    _off = int(str(_os.getenv("PS_HOLE_OFF", "-2")).strip())
+                except Exception:
+                    _off = -2
+                rect.adjust(_off, _off, 0, 0)
                 self._overlay.set_hole_rect(rect)
+                # z-순서 최상단 유지 시도
+                try:
+                    self.raise_()
+                except Exception:
+                    pass
         except Exception:
             pass
 
     def resizeEvent(self, ev) -> None:  # noqa: N802
         super().resizeEvent(ev)
         self._recalc_hole_from_widget()
+
+

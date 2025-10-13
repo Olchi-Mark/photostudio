@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-# app/pages/print_view.py — Photoshop DoAction(비동기) + Neural(ENTER 타이머 즉시 시작)
+# app/pages/print_view.py ? Photoshop DoAction(비동기) + Neural(ENTER 타이머 즉시 시작)
 # + TopMost 안전해제/복구 + 포커스강화 + 파일감시 + 진단로그/하트비트
 from __future__ import annotations
 
@@ -71,19 +71,12 @@ def _install_global_exhook():
             sys.__excepthook__(etype, e, tb)
     sys.excepthook = _exhook
 
-# 전역 훅 환경변수 가드: 기본 ON("1"), "0"이면 설치 생략
+# 전역 예외 훅 설정: 기본 ON, PV_EXHOOK=0이면 비활성화
 try:
     if os.getenv("PV_EXHOOK", "1") == "1":
         _install_global_exhook()
 except Exception:
-# 전역 예외 훅: 기본끈(0) → 1/on/true/yes면 켬
-if _env_on("PV_EXHOOK", "0"):   # 기본끔(0) → 1/on/true/yes면켬
-    try:
-        _install_global_exhook()
-    except Exception:
-        pass
-else:
-    _log("global excepthook disabled by PV_EXHOOK")
+    pass
 
 # 종료 훅은 항상 등록
 atexit.register(lambda: _state_update(phase="exit"))
@@ -343,8 +336,8 @@ def _activate_hwnd_strong(hwnd: int) -> bool:
         time.sleep(0.01)
         if _user32.GetForegroundWindow() == hwnd: return True
         # ALT trick
-        _user32.keybd_event(VK["MENU"], 0, 0, 0)
-        _user32.keybd_event(VK["MENU"], 0, 2, 0)
+        _user32.keybd_event(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]NU"], 0, 0, 0)
+        _user32.keybd_event(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]NU"], 0, 2, 0)
         _user32.SetForegroundWindow(hwnd)
         time.sleep(0.01)
         if _user32.GetForegroundWindow() == hwnd: return True
@@ -407,13 +400,13 @@ def _press_vk(vk: int, *, down: bool) -> None:
 
 def _send_combo(vk_main: int, *, ctrl=False, shift=False, alt=False) -> None:
     if not _user32: return
-    if ctrl:  _press_vk(VK["CTRL"],  down=True)
-    if shift: _press_vk(VK["SHIFT"], down=True)
-    if alt:   _press_vk(VK["MENU"],  down=True)
+    if ctrl:  _press_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]RL"],  down=True)
+    if shift: _press_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]IFT"], down=True)
+    if alt:   _press_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]NU"],  down=True)
     _press_vk(vk_main, down=True); _press_vk(vk_main, down=False)
-    if alt:   _press_vk(VK["MENU"],  down=False)
-    if shift: _press_vk(VK["SHIFT"], down=False)
-    if ctrl:  _press_vk(VK["CTRL"],  down=False)
+    if alt:   _press_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]NU"],  down=False)
+    if shift: _press_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]IFT"], down=False)
+    if ctrl:  _press_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]RL"],  down=False)
 
 def _parse_hotkey(hk: str) -> Tuple[int,bool,bool,bool]:
     s = (hk or "").upper().replace(" ", "")
@@ -422,14 +415,14 @@ def _parse_hotkey(hk: str) -> Tuple[int,bool,bool,bool]:
     shift= "SHIFT" in parts
     alt  = "ALT" in parts or "MENU" in parts
     main = next((p for p in parts if p.startswith("F")), "F6")
-    vk = VK.get(main, VK["F6"])
+    vk = VK.get(main, VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]"])
     return vk, ctrl, shift, alt
 
 def _send_enter_once() -> None:
-    sent = _sendinput_vk(VK["RETURN"])
+    sent = _sendinput_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]TURN"])
     if sent == 0 and _user32:
         _log("ENTER SendInput -> sent=0 (fallback keybd_event)")
-        _press_vk(VK["RETURN"], down=True); _press_vk(VK["RETURN"], down=False)
+        _press_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]TURN"], down=True); _press_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]TURN"], down=False)
 
 #──────── 텍스트 그림자 버튼 ────────
 class ShadowButton(QPushButton):
@@ -554,7 +547,7 @@ class _AIWorker(QObject):
             # 세션 ratio 코드 → (3,4)/(7,9)
             ratio = (3, 4) if str(self.ratio_code).strip() == "3040" else (7, 9)
 
-            # ✅ 고정 시그니처 호출(구버전 호환 인자 없음)
+            # ? 고정 시그니처 호출(구버전 호환 인자 없음)
             ok = False
             try:
                 ok = bool(AIR.process_file(
@@ -594,7 +587,7 @@ def _ps_running() -> bool:
         return False
     try:
         p = subprocess.run(
-            ["tasklist", "/FI", "IMAGENAME eq Photoshop.exe", "/FO", "CSV", "/NH"],
+            ["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]sklist", "/FI", "IMAGENAME eq Photoshop.exe", "/FO", "CSV", "/NH"],
             capture_output=True, text=True, creationflags=CREATE_NO_WINDOW
         )
         return "Photoshop.exe" in (p.stdout or "")
@@ -607,7 +600,7 @@ def _ps_close_async(grace_ms: int = 1500, force: bool = True) -> None:
     def _run():
         try:
             subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive",
+                ["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]wershell", "-NoProfile", "-NonInteractive",
                  "Get-Process -Name Photoshop -ErrorAction SilentlyContinue "
                  "| ForEach-Object { $_.CloseMainWindow() | Out-Null }"],
                 creationflags=CREATE_NO_WINDOW
@@ -617,7 +610,7 @@ def _ps_close_async(grace_ms: int = 1500, force: bool = True) -> None:
         time.sleep(max(0, grace_ms) / 1000.0)
         if force and _ps_running():
             try:
-                subprocess.run(["taskkill", "/IM", "Photoshop.exe", "/T", "/F"], creationflags=CREATE_NO_WINDOW)
+                subprocess.run(["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]skkill", "/IM", "Photoshop.exe", "/T", "/F"], creationflags=CREATE_NO_WINDOW)
                 _log("ps-close: taskkill /F issued")
             except Exception as e:
                 _log(f"ps-close: taskkill err: {e}")
@@ -642,36 +635,28 @@ class PrintViewPage(BasePage):
         overrides = _json_load(r"C:\\PhotoBox\\settings.json")
         self.config = _merge(defaults, overrides)
 
-        # ✅ 공통 지연
+        # ? 공통 지연
         self.DLY_MS = int(_deep_get(self.config, "photoshop.pipeline_delay_ms", 1000))
 
         # 스텝바
+        # 단계 라벨(표시용)
         step_labels = _deep_get(self.config, "flow.step_labels",
-                                ["인트로","정보입력","사이즈선택","촬영","사진선택","AI 보정","이메일전송","추가옵션","종료"])
+                                ["Intro","Input","Size","Capture","Pick","Preview","Email","Enhance","Outro"])
         steps_tokens = _deep_get(self.config, "flow.steps",
                                  ["INTRO","INPUT","SIZE","CAPTURE","PICK","PREVIEW","EMAIL","ENHANCE","OUTRO"])
         try: active_idx = steps_tokens.index("PREVIEW")
         except Exception: active_idx = 4
         super().__init__(theme, steps=step_labels, active_index=active_idx, parent=parent)
 
-        # 경로
-        self.ORIGIN_PATH  = _deep_get(self.config, "paths.origin",       r"C:\\PhotoBox\\origin_photo.jpg")
-        self.EDITED_DONE  = _deep_get(self.config, "paths.edited_done",  r"C:\\PhotoBox\\edited_photo.jpg")
-        self.RAW_DONE     = _deep_get(self.config, "paths.raw_done",     r"C:\\PhotoBox\\raw.jpg")
-        self.LIQUIFY_DONE = _deep_get(self.config, "paths.liquify_done", r"C:\\PhotoBox\\liquify.jpg")
-        self.SETTING_DIR  = _deep_get(self.config, "paths.setting_dir",  r"C:\\PhotoBox\\setting")
-        self.PRESET_DIR   = _deep_get(self.config, "paths.preset_dir",   r"C:\\PhotoBox\\setting\\preset")
-        self.AI_ORIGIN    = _deep_get(self.config, "paths.ai_out",       r"C:\\PhotoBox\\ai_origin_photo.jpg")
-
         # 액션
-        self.PS_RATIO_SET = _deep_get(self.config, "photoshop.ratio.set", "셀프스튜디오")
+        self.PS_RATIO_SET = _deep_get(self.config, "photoshop.ratio.set", "Default")
         self.PS_ACT_3040  = _deep_get(self.config, "photoshop.ratio.action_3040", "3X4")
         self.PS_ACT_3545  = _deep_get(self.config, "photoshop.ratio.action_3545", "3.5X4.5")
-        self.PS_LIQ_SET   = _deep_get(self.config, "photoshop.liquify.set", "셀프스튜디오")
+        self.PS_LIQ_SET   = _deep_get(self.config, "photoshop.liquify.set", "Default")
         self.PS_LIQ_ACT   = _deep_get(self.config, "photoshop.liquify.action", "liquify")
 
         # Background
-        self.PS_BG_SET    = _deep_get(self.config, "photoshop.background.set", "셀프스튜디오")
+        self.PS_BG_SET    = _deep_get(self.config, "photoshop.background.set", "Default")
         self.PS_BG_ACTIONS= _deep_get(self.config, "photoshop.background.actions",
                                       ["grada_blue","grada_brown","grada_gray"])
 
@@ -725,6 +710,10 @@ class PrintViewPage(BasePage):
 
         mid = QWidget(root); mid.setObjectName("midbar"); mb = QHBoxLayout(mid); mb.setContentsMargins(0,0,0,0); mb.setSpacing(int(self.TOK.get('btn_hgap',12))); mb.addStretch(1)
         self._btn_original = QPushButton("원본", mid); self._btn_original.setObjectName("midbtn")
+        try:
+            self._btn_original.setEnabled(os.path.exists(self.EDITED_DONE))
+        except Exception:
+            pass
         self._btn_original.pressed.connect(lambda: self._show_original(True))
         self._btn_original.released.connect(lambda: self._show_original(False))
         mb.addWidget(self._btn_original, 0, Qt.AlignRight)
@@ -742,14 +731,14 @@ class PrintViewPage(BasePage):
 
         # 행/버튼 라벨
         rows_cfg = _deep_get(self.config, "ai.rows", [
-            {"name":"Raw","components":["1","2","3"]},
-            {"name":"Liquify","components":["1","2","3"]},
-            {"name":"Neural","components":["1","2","3"]},
-            {"name":"Background","components":["1","2","3"]},
+            {"name":"Raw","components":["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"],"2","3"]},
+            {"name":"Liquify","components":["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"],"2","3"]},
+            {"name":"Neural","components":["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"],"2","3"]},
+            {"name":"Background","components":["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"],"2","3"]},
         ])
         self._rows: List[Dict] = []
         for i in range(4):
-            row = rows_cfg[i] if i < len(rows_cfg) else {"name": f"Row{i+1}", "components": ["1","2","3"]}
+            row = rows_cfg[i] if i < len(rows_cfg) else {"name": f"Row{i+1}", "components": ["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"],"2","3"]}
             comps = list(row.get("components", []))[:3]
             while len(comps) < 3:
                 comps.append(str(len(comps)+1))
@@ -758,9 +747,9 @@ class PrintViewPage(BasePage):
         # 4행×3열
         self._groups: List[QButtonGroup] = []
         for r_idx, row in enumerate(self._rows):
-            lbl = QLabel(row["name"], self._ui); lbl.setObjectName("rowTitle"); lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter); self.grid.addWidget(lbl, r_idx, 0)
+            lbl = QLabel(row["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]me"], self._ui); lbl.setObjectName("rowTitle"); lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter); self.grid.addWidget(lbl, r_idx, 0)
             grp = QButtonGroup(self._ui); grp.setExclusive(True); self._groups.append(grp)
-            for c_idx, text in enumerate(row["components"][:3]):
+            for c_idx, text in enumerate(row["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]mponents"][:3]):
                 btn = ShadowButton(str(text), self._ui); btn.setObjectName("sel"); btn.setCheckable(True)
                 btn.setTextShadow(int(self.TOK.get('shadow_dx',0)), int(self.TOK.get('shadow_dy',1)), self.TOK.get('shadow_color','#000000'))
                 btn.setTextColors(self.COL['primary_str'], '#FFFFFF')
@@ -853,9 +842,9 @@ class PrintViewPage(BasePage):
             self._act_worker = None
 
     def _rebuild_qss(self) -> None:
-        c = self.COL["primary_str"]; p = self.COL["primary"]; r,g,b = p.red(),p.green(),p.blue()
+        c = self.COL["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]imary_str"]; p = self.COL["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]imary"]; r,g,b = p.red(),p.green(),p.blue()
         hov = f"rgba({r},{g},{b},30)"
-        bdr = int(self.TOK["border"]); pv=int(self.TOK["btn_pad_v"]); ph=int(self.TOK["btn_pad_h"])
+        bdr = int(self.TOK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]rder"]); pv=int(self.TOK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]n_pad_v"]); ph=int(self.TOK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]n_pad_h"])
         br_prev=int(self.TOK['preview_radius']); br_btn=int(self.TOK['btn_radius'])
         fs_row=int(self.TOK['row_fs']); fw_row=int(self.TOK['row_weight']); fs_btn=int(self.TOK['btn_fs']); b2=max(1, int(self.TOK['border']*2))
         self._qss = f"""
@@ -1086,9 +1075,9 @@ class PrintViewPage(BasePage):
     #── Neural 진행 시퀀스(선택 → 계획) ──
     def _neural_plan_from_selection(self) -> List[str]:
         sel = int(self._sel_idx.get(2, 0))
-        if sel == 0:  return ["mode1"]
-        if sel == 1:  return ["mode1", "mode2"]
-        return ["mode1", "mode2", "mode2"]
+        if sel == 0:  return ["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]de1"]
+        if sel == 1:  return ["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]de1", "mode2"]
+        return ["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]de1", "mode2", "mode2"]
 
     # ========== Neural: DoAction 모드 (기본) ==========
     def _start_neural_chain(self):
@@ -1240,7 +1229,7 @@ class PrintViewPage(BasePage):
         if os.path.exists(self.EDITED_DONE):
             self._set_preview(self.EDITED_DONE)
 
-        # ✅ 성공 시: 전체 파이프라인 종료(오버레이 끄고 NEXT 활성화)
+        # ? 성공 시: 전체 파이프라인 종료(오버레이 끄고 NEXT 활성화)
         self._pipeline_done()
 
     def _pipeline_done(self):
@@ -1256,7 +1245,7 @@ class PrintViewPage(BasePage):
             pass
         _state_update(phase="pipeline_done")
         _log("pipeline done")
-        # ⇩ 추가: 포토샵 종료(비동기)
+        # ? 추가: 포토샵 종료(비동기)
         try:
             _ps_close_async(grace_ms=1500, force=True)
         except Exception as e:
@@ -1322,9 +1311,12 @@ class PrintViewPage(BasePage):
     def _show_original(self, on: bool) -> None:
         try:
             if on:
-                target = self.AI_ORIGIN if os.path.exists(self.AI_ORIGIN) else self.ORIGIN_PATH
-                if os.path.exists(target): self._set_preview(target)
-                else: self._toast("파일 없음")
+                if os.path.exists(self.ORIGIN_PATH):
+                    self._set_preview(self.ORIGIN_PATH)
+                    return
+                target = self.AI_ORIGIN if os.path.exists(self.AI_ORIGIN) else None
+                if target and os.path.exists(target): self._set_preview(target)
+                else: self._toast("원본 없음")
                 return
             if os.path.exists(self.EDITED_DONE): self._set_preview(self.EDITED_DONE)
         except Exception:
@@ -1372,3 +1364,13 @@ class PrintViewPage(BasePage):
         self._apply_preview_size()
         # showEvent에서 삭제/오버레이/감시/생성까지 처리하므로 여기서는 시작하지 않음
         return True
+
+
+
+
+
+
+
+
+
+

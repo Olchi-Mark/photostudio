@@ -28,6 +28,12 @@ _d.crsdk_get_lv_info.argtypes     = [C.c_void_p, C.POINTER(C.c_uint)]
 _d.crsdk_get_lv_info.restype      = C.c_int
 _d.crsdk_get_lv_image.argtypes    = [C.c_void_p, C.c_void_p, C.c_uint, C.POINTER(C.c_uint)]
 _d.crsdk_get_lv_image.restype     = C.c_int
+# optional: shoot-one api (if dll supports)
+try:
+    _d.crsdk_shoot_one.argtypes = [C.c_void_p, C.c_int]
+    _d.crsdk_shoot_one.restype  = C.c_int
+except Exception:
+    pass
 # optional: smoke helper to kick LV
 try:
     _d.crsdk_lv_smoke.argtypes = [C.c_void_p, C.c_wchar_p, C.POINTER(C.c_uint)]
@@ -36,9 +42,10 @@ except Exception:
     pass
 
 # ---- timing constants --------------------------------------------------------
-WARMUP_MS      = 90
-POLL_MS        = 50
-POLL_TOTAL_MS  = 3000
+# 워밍업/폴링 타이밍 보강(느린 초기 카메라 대응)
+WARMUP_MS      = 150   # enable 이후 초기 대기
+POLL_MS        = 60    # info 폴링 간격
+POLL_TOTAL_MS  = 8000  # 단계별 최대 대기 시간
 
 # 로거: CODING.md 규칙에 따라 logging을 사용한다.
 _logger = logging.getLogger("LV")
@@ -126,6 +133,10 @@ class _LiveViewThread(QThread):
             t_enable = time.time()
             rc_en = _d.crsdk_enable_liveview(self._h, 1)
             _logf_info("enable rc=%s", rc_en)
+            try:
+                time.sleep(WARMUP_MS / 1000.0)
+            except Exception:
+                pass
             # Allow buffers to warm up before pulling info
             time.sleep(WARMUP_MS / 1000.0)
             self.statusChanged.emit("sdk")
@@ -175,7 +186,7 @@ class _LiveViewThread(QThread):
                         break
                 time.sleep(POLL_MS / 1000.0)
 
-            # Phase 2: 여전히 need==0이면 smoke 1회 후 재폴링
+            # Phase 2: 여전히 need==0이면 smoke 1회(+재시도) 후 재폴링
             if buf is None and not self._stop.is_set():
                 # Guard: skip smoke if symbol missing
                 if getattr(_d, "crsdk_lv_smoke", None) is None:
@@ -185,6 +196,14 @@ class _LiveViewThread(QThread):
                         nbytes = C.c_uint(0)
                         rc_smoke = _d.crsdk_lv_smoke(self._h, None, C.byref(nbytes))
                         _logf_info("smoke rc=%s", rc_smoke)
+                        if rc_smoke != 0:
+                            time.sleep(0.12)
+                            try:
+                                nbytes2 = C.c_uint(0)
+                                rc_smoke2 = _d.crsdk_lv_smoke(self._h, None, C.byref(nbytes2))
+                                _logf_info("smoke2 rc=%s", rc_smoke2)
+                            except Exception:
+                                _log_info("smoke2 rc=ERR")
                     except Exception:
                         _log_info("smoke rc=ERR")
                 t1 = time.time()
@@ -284,7 +303,7 @@ class _LiveViewThread(QThread):
                     except Exception:
                         pass
                     # 1회 복구 후 타이머 리셋
-                    last_frame_ts = time.time()
+                    last_frame_ts = last_frame_ts
                 if buf is None:
                     if _d.crsdk_get_lv_info(self._h, C.byref(need)) == 0 and need.value > 0:
                         buf = (C.c_ubyte * int(need.value))()
@@ -408,6 +427,35 @@ class LiveViewService(QObject):
             pass
         self._th.start()
         return True
+
+    # ---- capture helpers ---------------------------------------------------
+    def shoot_one(self) -> int:
+        """카메라 셔터를 1회 동작시킨다. 0=성공, 그 외 실패.
+        - 워커 쓰레드의 CRSDK 핸들(_th._h)이 있으면 그 핸들로 호출한다.
+        - 없다면 서비스 보유 핸들(_h) 시도.
+        예외는 1줄 로그 후 -1 반환.
+        """
+        try:
+            h = None
+            try:
+                if getattr(self, "_th", None) is not None:
+                    h = getattr(self._th, "_h", None)
+            except Exception:
+                h = None
+            if not h or not getattr(h, 'value', None):
+                h = getattr(self, "_h", None)
+            if not h or not getattr(h, 'value', None):
+                _log("shoot_one: no handle")
+                return -1
+            try:
+                rc = int(_d.crsdk_shoot_one(h, 0))
+            except Exception:
+                rc = -1
+            _logf_info("shoot rc=%s", rc)
+            return 0 if rc == 0 else -1
+        except Exception as ex:
+            _logf_info("shoot err=%s", ex)
+            return -1
 
     # 라이브뷰를 중단하고 연결된 신호를 해제한다.
     def stop(self) -> None:

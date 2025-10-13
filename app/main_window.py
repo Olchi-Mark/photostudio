@@ -8,6 +8,9 @@ from app.ui.router import PageRouter
 from app.pages.intro import IntroPage
 from app.pages.input import InputPage
 from app.pages.size_select import SizeSelectPage
+  
+
+
 from app.pages.capture import CapturePage
 from app.pages.pick_photo import PickPhotoPage
 from app.pages.print_view import PrintViewPage

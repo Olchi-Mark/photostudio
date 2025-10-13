@@ -1574,8 +1574,8 @@ class Guidance:
     def _show_original(self, on: bool) -> None:
         try:
             if on:
-                target = self.AI_ORIGIN if os.path.exists(self.AI_ORIGIN) else self.ORIGIN_PATH
-                if os.path.exists(target): self._set_preview(target)
+                target = self.ORIGIN_PATH if os.path.exists(self.ORIGIN_PATH) else (self.AI_ORIGIN if os.path.exists(self.AI_ORIGIN) else None)
+                if target and os.path.exists(target): self._set_preview(target)
                 else: self._toast("파일 없음")
                 return
             if os.path.exists(self.EDITED_DONE): self._set_preview(self.EDITED_DONE)
@@ -1707,3 +1707,5 @@ try:
 except Exception:
     pass
 # ======================= /PATCH =======================
+
+
