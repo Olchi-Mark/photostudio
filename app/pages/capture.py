@@ -237,33 +237,23 @@ class CapturePage(BasePage):
 
         self._gap36b = QWidget(self); self._gap36b.setFixedHeight(0); layout.addWidget(self._gap36b, 0)
 
-        # ?? 而⑦듃濡?諛???
+        # Controls (delay buttons / capture / retake)
         self.ctrl = QWidget(self)
         hb = QHBoxLayout(self.ctrl); hb.setContentsMargins(0,0,0,0); hb.setSpacing(0); hb.setAlignment(Qt.AlignHCenter)
-
-        self.cam_led = QLabel(self.ctrl); self.cam_led.setObjectName("CamLED")
-        hb.addWidget(self.cam_led, 0)
-
-        self.delay3 = QPushButton("3珥?, self.ctrl); self.delay3.setObjectName("Delay3"); self.delay3.setCheckable(True)
-        self.delay5 = QPushButton("5珥?, self.ctrl); self.delay5.setObjectName("Delay5"); self.delay5.setCheckable(True)
-        self.delay7 = QPushButton("7珥?, self.ctrl); self.delay7.setObjectName("Delay7"); self.delay7.setCheckable(True)
+        self.cam_led = QLabel(self.ctrl); self.cam_led.setObjectName("CamLED"); hb.addWidget(self.cam_led, 0)
+        self.delay3 = QPushButton("3s", self.ctrl); self.delay3.setObjectName("Delay3"); self.delay3.setCheckable(True)
+        self.delay5 = QPushButton("5s", self.ctrl); self.delay5.setObjectName("Delay5"); self.delay5.setCheckable(True)
+        self.delay7 = QPushButton("7s", self.ctrl); self.delay7.setObjectName("Delay7"); self.delay7.setCheckable(True)
         self.delay_group = QButtonGroup(self)
         for i, b in ((3,self.delay3),(5,self.delay5),(7,self.delay7)): self.delay_group.addButton(b, i); hb.addWidget(b, 0)
         self.delay_group.setExclusive(True); self.delay3.setChecked(True)
-        # 3/5/7珥?踰꾪듉? 鍮꾪솢??鍮꾪몴??泥섎━
-        try:
-            self.delay_group.idClicked.disconnect(self._on_delay_changed)
-        except Exception:
-            pass
+        try: self.delay_group.idClicked.disconnect(self._on_delay_changed)
+        except Exception: pass
         for b in (self.delay3, self.delay5, self.delay7):
-            try:
-                b.setEnabled(False)
-                b.setVisible(False)
-            except Exception:
-                pass
-
-        self.btn_capture = QPushButton("珥ъ쁺", self.ctrl); self.btn_capture.setObjectName("BtnCapture")
-        self.btn_retake  = QPushButton("?ъ눋??, self.ctrl); self.btn_retake.setObjectName("BtnRetake")
+            try: b.setEnabled(False); b.setVisible(False)
+            except Exception: pass
+        self.btn_capture = QPushButton("Capture", self.ctrl); self.btn_capture.setObjectName("BtnCapture")
+        self.btn_retake  = QPushButton("Retake", self.ctrl); self.btn_retake.setObjectName("BtnRetake")
         self.btn_capture.clicked.connect(self._on_capture_clicked)
         self.btn_retake.clicked.connect(self._on_retake_clicked)
         hb.addWidget(self.btn_capture, 0); hb.addWidget(self.btn_retake, 0)

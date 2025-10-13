@@ -336,8 +336,8 @@ def _activate_hwnd_strong(hwnd: int) -> bool:
         time.sleep(0.01)
         if _user32.GetForegroundWindow() == hwnd: return True
         # ALT trick
-        _user32.keybd_event(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]NU"], 0, 0, 0)
-        _user32.keybd_event(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]NU"], 0, 2, 0)
+        _user32.keybd_event(VK["MENU"], 0, 0, 0)
+        _user32.keybd_event(VK["MENU"], 0, 2, 0)
         _user32.SetForegroundWindow(hwnd)
         time.sleep(0.01)
         if _user32.GetForegroundWindow() == hwnd: return True
@@ -400,13 +400,13 @@ def _press_vk(vk: int, *, down: bool) -> None:
 
 def _send_combo(vk_main: int, *, ctrl=False, shift=False, alt=False) -> None:
     if not _user32: return
-    if ctrl:  _press_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]RL"],  down=True)
-    if shift: _press_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]IFT"], down=True)
-    if alt:   _press_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]NU"],  down=True)
+    if ctrl:  _press_vk(VK["CTRL"],  down=True)
+    if shift: _press_vk(VK["SHIFT"], down=True)
+    if alt:   _press_vk(VK["MENU"],  down=True)
     _press_vk(vk_main, down=True); _press_vk(vk_main, down=False)
-    if alt:   _press_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]NU"],  down=False)
-    if shift: _press_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]IFT"], down=False)
-    if ctrl:  _press_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]RL"],  down=False)
+    if alt:   _press_vk(VK["MENU"],  down=False)
+    if shift: _press_vk(VK["SHIFT"], down=False)
+    if ctrl:  _press_vk(VK["CTRL"],  down=False)
 
 def _parse_hotkey(hk: str) -> Tuple[int,bool,bool,bool]:
     s = (hk or "").upper().replace(" ", "")
@@ -415,14 +415,14 @@ def _parse_hotkey(hk: str) -> Tuple[int,bool,bool,bool]:
     shift= "SHIFT" in parts
     alt  = "ALT" in parts or "MENU" in parts
     main = next((p for p in parts if p.startswith("F")), "F6")
-    vk = VK.get(main, VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]"])
+    vk = VK.get(main, VK["RETURN"])
     return vk, ctrl, shift, alt
 
 def _send_enter_once() -> None:
-    sent = _sendinput_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]TURN"])
+    sent = _sendinput_vk(VK["RETURN"])
     if sent == 0 and _user32:
         _log("ENTER SendInput -> sent=0 (fallback keybd_event)")
-        _press_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]TURN"], down=True); _press_vk(VK["인트로","정보입력","사이즈","촬영","선택","미리보기","이메일","보정","완료"]TURN"], down=False)
+        _press_vk(VK["RETURN"], down=True); _press_vk(VK["RETURN"], down=False)
 
 #──────── 텍스트 그림자 버튼 ────────
 class ShadowButton(QPushButton):
@@ -1364,6 +1364,7 @@ class PrintViewPage(BasePage):
         self._apply_preview_size()
         # showEvent에서 삭제/오버레이/감시/생성까지 처리하므로 여기서는 시작하지 않음
         return True
+
 
 
 
