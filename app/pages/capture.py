@@ -1044,16 +1044,11 @@ class CapturePage(BasePage):
             threading.Thread(target=_work, daemon=True).start()
 
         def _guard():
-            try: _log.warning("[CONN] 12s elapsed: still connecting")
-            except Exception: pass
-            return
-            if self._connecting:
-                self._connecting = False
-                try: self.lv.stop()
-                except Exception: pass
-                self.set_led_mode('off')
-                self.busy.setText("Camera connection failed")
-                self.busy.setText("Camera connection failed")
+            try:
+                if getattr(self, "_connecting", False):
+                    _log.warning("[CONN] 12s elapsed: still connecting")
+            except Exception:
+                pass
         QTimer.singleShot(12000, _guard)
 
     def _on_qimage(self, img: QImage):
