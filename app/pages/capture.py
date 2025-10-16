@@ -1046,7 +1046,8 @@ class CapturePage(BasePage):
         def _guard():
             try:
                 if getattr(self, "_connecting", False):
-                    _log.warning("[CONN] 12s elapsed: still connecting")
+                    # 연결 경과 알림(12초) 로그는 소음이므로 비활성화
+                    # _log.warning("[CONN] 12s elapsed: still connecting")
             except Exception:
                 pass
         QTimer.singleShot(12000, _guard)
