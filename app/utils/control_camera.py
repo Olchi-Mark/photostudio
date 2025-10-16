@@ -241,7 +241,7 @@ class CameraControl:
                     except queue.Empty:
                         pass
 
-
+                    now = time.time()
                     if now - self._last_keep > 2.0:
                         try:
                             enable_liveview(h, True)

@@ -246,6 +246,38 @@ class SDKCamera:
         return path
 
 
+# 모듈 수준 간단 래퍼(호환성): enable_liveview/get_lv_info/get_lv_image
+def enable_liveview(h: C.c_void_p, on: bool) -> int:
+    """라이브뷰 On/Off(성공 0, 실패 -1)."""
+    try:
+        return int(_d.crsdk_enable_liveview(h, 1 if on else 0))
+    except Exception:
+        return -1
+
+def get_lv_info(h: C.c_void_p) -> int:
+    """라이브뷰 필요 바이트 수(실패 0)."""
+    try:
+        need = C.c_uint(0)
+        rc = int(_d.crsdk_get_lv_info(h, C.byref(need)))
+        return int(need.value) if rc == 0 else 0
+    except Exception:
+        return 0
+
+def get_lv_image(h: C.c_void_p) -> bytes:
+    """라이브뷰 프레임 바이트(실패 빈 바이트)."""
+    try:
+        need = C.c_uint(0)
+        if _d.crsdk_get_lv_info(h, C.byref(need)) != 0 or need.value == 0:
+            return b""
+        buf = (C.c_ubyte * int(need.value))()
+        used = C.c_uint(0)
+        rc = int(_d.crsdk_get_lv_image(h, C.cast(buf, C.c_void_p), C.c_uint(len(buf)), C.byref(used)))
+        if rc == 0 and used.value:
+            return bytes(memoryview(buf)[: used.value])
+    except Exception:
+        return b""
+    return b""
+
 __all__ = list(globals().get('__all__', [])) + ['CRSDKBridge']
 class CRSDKBridge(SDKCamera):  # noqa: N801
     """호환성을 위한 SDKCamera의 별칭 클래스이다."""
