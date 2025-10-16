@@ -40,6 +40,9 @@ class CameraControl:
         self._last_keep = 0.0
         self._last_dir: Optional[str] = None
 
+        # 내부 명령 처리 큐
+        self._q: "queue.Queue[Dict[str, Any]]" = queue.Queue()
+
 
 
     def connect_first(self) -> bool:
