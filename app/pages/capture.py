@@ -256,6 +256,18 @@ class CapturePage(BasePage):
 
         self._ai_rate_ms = 500; self._ai_last_ms = 0; self._ema: Dict[str, float] = {}
         self.guide = Guidance(rate_ms=500)
+        # Guidance 입력 최신 프레임 버퍼(ndarray)와 틱 타이머(10–15Hz)
+        self._rgb_latest = None
+        self._rgb_lock = threading.Lock()
+        self._ai_timer = QTimer(self)
+        try:
+            _ai_iv = int(getattr(self, '_ai_rate_ms', 83) or 83)
+        except Exception:
+            _ai_iv = 83
+        _ai_iv = max(66, min(100, _ai_iv))
+        self._ai_timer.setInterval(_ai_iv)
+        self._ai_timer.timeout.connect(self._ai_tick)
+        self._ai_timer.start()
 
 
         try:
@@ -1673,17 +1685,18 @@ class CapturePage(BasePage):
             return False
 
     def _on_frame_bytes(self, data: bytes, ts_ms: int, meta: dict):
+        # 단일 디코딩: bytes -> ndarray RGB, 미리보기는 얕은 래핑 후 copy(), 분석은 동일 ndarray 사용
         try:
-            qi = QImage.fromData(data, "JPG")
-            if qi.isNull():
-                import numpy as np, cv2
-                arr = np.frombuffer(data, dtype=np.uint8)
-                bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-                if bgr is None:
-                    return
-                rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-                h_, w_, _ = rgb.shape
-                qi = QImage(rgb.data, w_, h_, 3*w_, QImage.Format_RGB888).copy()
+            import numpy as np, cv2
+            arr = np.frombuffer(data, dtype=np.uint8)
+            bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if bgr is None:
+                return
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            h_, w_, _ = rgb.shape
+            with self._rgb_lock:
+                self._rgb_latest = rgb
+            qi = QImage(rgb.data, w_, h_, 3*w_, QImage.Format_RGB888).copy()
         except Exception:
             return
         try:
@@ -1693,3 +1706,37 @@ class CapturePage(BasePage):
                 self._on_qimage(qi)
             except Exception:
                 pass
+
+    def _ai_tick(self):
+        try:
+            if getattr(self, "_capturing", False) and not getattr(self, "_armed_for_auto", False):
+                return
+            if not hasattr(self, 'guide'):
+                return
+            rgb = None
+            with self._rgb_lock:
+                rgb = self._rgb_latest
+            if rgb is None:
+                return
+            h_, w_, _ = getattr(rgb, 'shape', (0, 0, 0))
+            if w_ <= 0 or h_ <= 0:
+                return
+            qimg = QImage(rgb.data, w_, h_, 3*w_, QImage.Format_RGB888)
+            ts_ai = int(time.time() * 1000)
+            try:
+                if hasattr(self.guide, 'set_input_source'):
+                    self.guide.set_input_source('sdk')
+            except Exception:
+                pass
+            payload, badges, metrics = self.guide.update(
+                qimg,
+                self.get_ratio(), ts_ai,
+                getattr(self, 'face', None), getattr(self, 'pose', None)
+            )
+            try:
+                if hasattr(self.overlay, 'update_landmarks'):
+                    self.overlay.update_landmarks(payload, normalized=True)
+            except Exception:
+                pass
+        except Exception:
+            pass
