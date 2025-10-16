@@ -14,7 +14,7 @@ import time
 from typing import Callable, Optional, Dict, Any
 import queue
 
-# ???? ???⑥ル츥???κ땀??: ????쇰뮚?????繹먮냱????????/???뚯????LV ??嶺??????곌떽釉붾?
+
 from .control_camera_sdk import CRSDKBridge, enable_liveview, get_lv_info, get_lv_image
 from .crsdk_pybridge import error_name as _errname
 
@@ -29,9 +29,9 @@ class CameraControl:
     - ????썹땟????汝??吏???1Hz??????寃??, keepalive??2?????녿뮝??怨룸렓???    """
 
     def __init__(self) -> None:
-        # ???? ???⑥ル츥???κ땀?? ?癲ル슢???吏????ㅿ폍筌?
+
         self._b = CRSDKBridge()
-        # ???????嶺???
+
         self._th: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._cb: Optional[Callable[[bytes, int, Dict[str, Any]], None]] = None
@@ -39,9 +39,9 @@ class CameraControl:
         self._last_log_ms = 0
         self._last_keep = 0.0
         self._last_dir: Optional[str] = None
-        # ??影?れ쉠????꿔꺂????????        self._q: "queue.Queue[Dict[str, Any]]" = queue.Queue()
 
-    # ----- ????쇰뮚??????ㅼ굣?????繹먮냱????????: ???? ???⑥ル츥???κ땀????????썹땟?④덩?-----
+
+
     def connect_first(self) -> bool:
         """??⑤㈇??癲????????????쇰뮚?????嶺뚮㉡????嶺뚮㉡???USB_SERIAL ???????얠?)."""
         return bool(self._b.connect_first())
@@ -68,19 +68,19 @@ class CameraControl:
     def get_last_saved_jpeg(self, timeout_s: float = 2.0) -> Optional[str]:
         """?꿔꺂?????????逆곷틳爰덂퐲?JPEG ?嚥▲굧???뚪뜮?熬곣벀嫄???됰슦?????嶺뚮㉡?????????꿔꺂??????????덊떀)."""
         cmd: Dict[str, Any] = {"op": "last_saved"}
-        return self._enqueue_cmd(cmd, timeout_s=timeout_s, default=None)  # type: ignore[return-value]
+        return self._enqueue_cmd(cmd, timeout_s=timeout_s, default=None)
 
     def one_shot_af(self, timeout_s: float = 3.0) -> Optional[int]:
         """?????AF???????덊떀??嶺뚮㉡?????????꿔꺂??????????덊떀)."""
         cmd: Dict[str, Any] = {"op": "af"}
-        return self._enqueue_cmd(cmd, timeout_s=timeout_s, default=None)  # type: ignore[return-value]
+        return self._enqueue_cmd(cmd, timeout_s=timeout_s, default=None)
 
     def one_shot_awb(self, timeout_s: float = 3.0) -> Optional[int]:
         """?????AWB???????덊떀??嶺뚮㉡?????????꿔꺂??????????덊떀)."""
         cmd: Dict[str, Any] = {"op": "awb"}
-        return self._enqueue_cmd(cmd, timeout_s=timeout_s, default=None)  # type: ignore[return-value]
+        return self._enqueue_cmd(cmd, timeout_s=timeout_s, default=None)
 
-    # ----- ????: ??影?れ쉠?????????ｋ??-----
+
     def _enqueue_cmd(self, cmd: Dict[str, Any], timeout_s: float, default: Any):
         """????????????影?れ쉠???? ?鶯ㅺ동????궰??嚥▲굧?????ル벥嫄????뚯????β뼯猷????살퓢??"""
         evt = threading.Event()
@@ -93,7 +93,7 @@ class CameraControl:
         ok = evt.wait(timeout=max(0.01, float(timeout_s)))
         return box.get("res", default) if ok else default
 
-    # ----- ??濚밸Ŧ?????⑥ル츥???????-----
+
     def start_liveview(self, on_frame_bytes: Callable[[bytes, int, Dict[str, Any]], None], frame_interval_ms: int = 33) -> bool:
         """??濚밸Ŧ?????⑥ル츥??????볥궚?????嶺뚮??ｆ뤃???野껊뿈???熬곣뫖利??????ш끽維뽳㎘?琉???癲ル슢?????嶺뚮㉡???
 
@@ -109,7 +109,7 @@ class CameraControl:
         self._last_log_ms = 0
         self._last_keep = 0.0
 
-        # ????????쇰뮚????⑤슢???? ?癲ル슢??蹂좊쨨??????ㅼ굡?類㎮뵾??꿔꺂?ｉ뜮戮녹춹??????쇰뮚????嶺뚮㉡??? ?????곌숯 ??False ?熬곣뫖利?????濚밸Þ?쀯쭕??熬곣뫖?삥납?)
+
         try:
             h0 = getattr(self._b, "_h", None)
             if not h0 or not getattr(h0, "value", None):
@@ -118,7 +118,7 @@ class CameraControl:
             pass
         h0 = getattr(self._b, "_h", None)
         if not h0 or not getattr(h0, "value", None):
-            # ?몃뱾???놁쑝硫??닿굅 湲곕컲?쇰줈 ??踰????쒕룄?섍퀬, ?ㅽ뙣 ??以묐떒?쒕떎.
+
             try:
                 self._b.connect_first()
             except Exception:
@@ -130,7 +130,7 @@ class CameraControl:
                 except Exception:
                     pass
                 return False
-        # Enforce enumeration-only path unless explicitly allowed by env
+
         try:
             os.environ.setdefault("CRSDK_FORCE_ENUM", "1")
             try:
@@ -143,7 +143,7 @@ class CameraControl:
 
         def _run():
             try:
-                # ????쇰뮚???????紐낅젩??????쇰뮚????嶺뚮㉡???
+
                 try:
                     if not getattr(self._b, "_h", None) or not getattr(getattr(self._b, "_h", None), "value", None):
                         self._b.connect_first()
@@ -154,22 +154,22 @@ class CameraControl:
                     _log.info("[CAM] no handle; start_liveview aborted")
                     return
 
-                # ??濚밸Ŧ?????⑥ル츥????嶺????+ ??????                try:
+
                 try:
                     rc_en = int(enable_liveview(h, True))
                     _log.info("[CAM] lv_on rc=%s", rc_en)
                 except Exception:
                     rc_en = -1
-                time.sleep(0.150)  # WARMUP 150ms
+                time.sleep(0.150)
 
                 gap = self._ms / 1000.0
                 need0 = 0
                 last_need_ts = time.time()
-                # ???誘⑸????⑤슢?뽫뵓嫄붋??????븐뻤????⑤슢堉???                last_frame_ts = time.time()
-                backoff = 0.5  # ??????루뇖??꿔꺂??????熬곣뫖利??????嶺뚮??ｆ뤃????
+
+                backoff = 0.5
                 reapply_done = False
                 while not self._stop.is_set():
-                    # 1) ??影?れ쉠????????????얠? ?꿔꺂??節뉖き???꿔꺂?????
+
                     try:
                         while True:
                             cmd = self._q.get_nowait()
@@ -230,7 +230,7 @@ class CameraControl:
                                 except Exception:
                                     pass
                                 res = rc
-                            # ?嚥▲굧???????
+
                             box["res"] = res
                             evt = box.get("evt")
                             if isinstance(evt, threading.Event):
@@ -241,7 +241,7 @@ class CameraControl:
                     except queue.Empty:
                         pass
 
-                    # 2) keepalive 2????                    now = time.time()
+
                     if now - self._last_keep > 2.0:
                         try:
                             enable_liveview(h, True)
@@ -249,7 +249,7 @@ class CameraControl:
                             pass
                         self._last_keep = now
 
-                    # 3) ????썹땟???????癲ル슢캉????
+
                     need = 0
                     try:
                         need = int(get_lv_info(h))
@@ -257,7 +257,7 @@ class CameraControl:
                         need = 0
                     if need <= 0:
                         if need0 == 0:
-                        # need==0??1???????壤??꿔꺂????????ル룎????????汝??吏?????????                        if need0 == 0:
+
                             need0 = 1
                             last_need_ts = now
                         elif (now - last_need_ts) >= 1.0:
@@ -267,7 +267,7 @@ class CameraControl:
                             except Exception:
                                 pass
                         time.sleep(0.08)
-                        # need=0 ????븐뻤??쒖몴筌???쎛 ???궰?嶺?吏??룻떐????嚥▲굧??????????루뇖???嶺뚮㉡???
+
                         if now - last_frame_ts >= 1.2:
                             if self._stop.is_set():
                                 break
@@ -293,7 +293,7 @@ class CameraControl:
                                         pass
                                     time.sleep(0.150)
                                     if (not reapply_done) and self._last_dir:
-                                    # ??????루뇖????????嚥▲굧???뚪뜮?1???????                                    if (not reapply_done) and self._last_dir:
+
                                         try:
                                             rc = self._b.set_save_dir(self._last_dir)
                                             _log.info("[SAVE] reapply dir=%s rc=%s", self._last_dir, rc)
@@ -310,7 +310,7 @@ class CameraControl:
                                 backoff = min(2.0, backoff * 2.0)
                         continue
 
-                    # 4) ?????꿔꺂??? ??????
+
                     try:
                         data = bytes(get_lv_image(h) or b"")
                     except Exception:
@@ -327,7 +327,7 @@ class CameraControl:
                             except Exception:
                                 _log.exception("[CAM] on_frame_bytes error")
 
-                        # 1Hz ????썹땟????汝??吏??
+
                         try:
                             if ts_ms - int(self._last_log_ms or 0) >= 1000:
                                 self._last_log_ms = ts_ms
@@ -337,7 +337,7 @@ class CameraControl:
 
                     time.sleep(gap)
             finally:
-                # ????띻샴癲??癲ル슢???뚭괌?
+
                 try:
                     h2 = getattr(self._b, "_h", None)
                     if h2 and getattr(h2, "value", None):
