@@ -135,8 +135,16 @@ class SDKCamera:
                 _d.crsdk_disconnect(self.h)
         finally:
             self.h = C.c_void_p()
-            try: _d.crsdk_release()
-            except Exception: pass
+        try: _d.crsdk_release()
+        except Exception: pass
+
+    # convenience: bool-returning connect wrapper
+    def connect_first(self, serial: Optional[str]=None) -> bool:
+        try:
+            self.open(serial=serial)
+            return True
+        except Exception:
+            return False
 
     # --- liveview ---
     def start_lv(self) -> None:

@@ -111,19 +111,19 @@ class CameraControl:
 
 
         try:
-            h0 = getattr(self._b, "_h", None)
+            h0 = getattr(self._b, "h", None)
             if not h0 or not getattr(h0, "value", None):
                 self._b.connect_first()
         except Exception:
             pass
-        h0 = getattr(self._b, "_h", None)
+        h0 = getattr(self._b, "h", None)
         if not h0 or not getattr(h0, "value", None):
 
             try:
                 self._b.connect_first()
             except Exception:
                 pass
-            h0 = getattr(self._b, "_h", None)
+            h0 = getattr(self._b, "h", None)
             if not h0 or not getattr(h0, "value", None):
                 try:
                     _log.info("[CAM] no handle; start_liveview aborted (pre)")
@@ -145,11 +145,11 @@ class CameraControl:
             try:
 
                 try:
-                    if not getattr(self._b, "_h", None) or not getattr(getattr(self._b, "_h", None), "value", None):
+                    if not getattr(self._b, "h", None) or not getattr(getattr(self._b, "h", None), "value", None):
                         self._b.connect_first()
                 except Exception:
                     pass
-                h = getattr(self._b, "_h", None)
+                h = getattr(self._b, "h", None)
                 if not h or not getattr(h, "value", None):
                     _log.info("[CAM] no handle; start_liveview aborted")
                     return
@@ -285,7 +285,7 @@ class CameraControl:
                                 except Exception:
                                     pass
                                 ok = bool(self._b.connect_first())
-                                h = getattr(self._b, "_h", None)
+                                h = getattr(self._b, "h", None)
                                 if ok and h and getattr(h, "value", None):
                                     try:
                                         enable_liveview(h, True)
@@ -368,5 +368,3 @@ class CameraControl:
 
 
 __all__ = ["CRSDKBridge", "CameraControl"]
-
-
