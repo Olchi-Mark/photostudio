@@ -1672,16 +1672,17 @@ class CapturePage(BasePage):
             return False
 
     def _on_frame_bytes(self, data: bytes, ts_ms: int, meta: dict):
-        """Decode JPEG bytes once to RGB ndarray, wrap to QImage, and forward to existing render path."""
         try:
-            import numpy as np, cv2
-            arr = np.frombuffer(data, dtype=np.uint8)
-            bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-            if bgr is None:
-                return
-            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-            h_, w_, _ = rgb.shape
-            qi = QImage(rgb.data, w_, h_, 3*w_, QImage.Format_RGB888).copy()
+            qi = QImage.fromData(data, "JPG")
+            if qi.isNull():
+                import numpy as np, cv2
+                arr = np.frombuffer(data, dtype=np.uint8)
+                bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                if bgr is None:
+                    return
+                rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                h_, w_, _ = rgb.shape
+                qi = QImage(rgb.data, w_, h_, 3*w_, QImage.Format_RGB888).copy()
         except Exception:
             return
         try:
