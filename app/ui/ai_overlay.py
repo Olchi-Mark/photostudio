@@ -126,6 +126,28 @@ class OverlayCanvas(QWidget):
                 pt = self._map_pt(p, hole, normalized)
                 qp.drawPoint(pt)
 
+        def draw_poly(points: Optional[Iterable[Tuple[float, float]]], color_rgba, w: int = 2, closed: bool = True, fill: Optional[Tuple[int, int, int, int]] = None):
+            if not points:
+                return
+            pen = QPen(self._rgba(color_rgba))
+            pen.setWidth(int(w))
+            qp.setPen(pen)
+            qp.setBrush(Qt.NoBrush if not fill else self._rgba(fill))
+            pts = [self._map_pt(p, hole, normalized) for p in points]
+            if len(pts) < 2:
+                for pt in pts:
+                    qp.drawPoint(pt)
+                return
+            path = QPainterPath()
+            path.moveTo(pts[0])
+            for pt in pts[1:]:
+                path.lineTo(pt)
+            if closed:
+                path.closeSubpath()
+            if fill:
+                qp.fillPath(path, self._rgba(fill))
+            qp.drawPath(path)
+
         if payload.get("pro_mesh"):
             draw_pts(payload.get("pro_mesh"), self._TOK.get("pt_pro"), 1)
         chin = payload.get("chin_ring")
@@ -141,6 +163,36 @@ class OverlayCanvas(QWidget):
             draw_pts(core.values(), self._TOK.get("pt_core"), 3)
         else:
             draw_pts(core, self._TOK.get("pt_core"), 3)
+
+        # polygons / polylines / bbox / labels (optional payload keys)
+        polys = payload.get("polygons") or []
+        for poly in polys:
+            draw_poly(poly, self._TOK.get("pt_core"), w=int(self._TOK.get("stroke", 3)), closed=True)
+        lines = payload.get("polylines") or []
+        for ln in lines:
+            draw_poly(ln, self._TOK.get("pt_eye"), w=2, closed=False)
+        bbox = payload.get("bbox")
+        if bbox and isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+            x, y, w, h = [float(v) for v in bbox]
+            p0 = self._map_pt((x, y), hole, normalized)
+            p1 = self._map_pt((x + w, y + h), hole, normalized)
+            pen = QPen(self._rgba(self._TOK.get("pt_core")))
+            pen.setWidth(int(self._TOK.get("stroke", 3)))
+            qp.setPen(pen)
+            qp.setBrush(Qt.NoBrush)
+            qp.drawRect(QRectF(p0, p1))
+        labels = payload.get("labels") or []
+        try:
+            for item in labels:
+                txt = str(item.get("text", ""))
+                pos = item.get("pos", (0.0, 0.0))
+                pt = self._map_pt(pos, hole, normalized)
+                pen = QPen(QColor(255, 255, 255, 230))
+                pen.setWidth(1)
+                qp.setPen(pen)
+                qp.drawText(pt, txt)
+        except Exception:
+            pass
 
     # ?섏씤??-------------------------------------------------------------------
     def paintEvent(self, ev) -> None:  # noqa
@@ -328,5 +380,4 @@ class AiOverlay(QWidget):
     def resizeEvent(self, ev) -> None:  # noqa: N802
         super().resizeEvent(ev)
         self._recalc_hole_from_widget()
-
 
