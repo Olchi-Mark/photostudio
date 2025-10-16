@@ -42,8 +42,8 @@ LV_DEFAULT_MS_SDK  = 33
 LV_DEFAULT_MS_FILE = 48
 PLACEHOLDER_DEFAULT = r"app\assets\placeholder.png"
 
-CAP_DIR = Path(r"C:\PhotoBox\captures")
-CAP_SEQ = ["01.jpg","02.jpg","03.jpg","04.jpg"]
+CAP_DIR = Path(r"C:\\PhotoBox\\cap")
+CAP_SEQ = ["cap_01.jpg","cap_02.jpg","cap_03.jpg","cap_04.jpg"]
 
 TH_COUNT = 4; TH_GAP = 36; TH_H = 216; TH_W_3040 = 162; TH_W_3545 = 168
 P_GAP = 36; PREV_H = 1008; PREV_W_3040 = 756; PREV_W_3545 = 784
@@ -461,7 +461,9 @@ class CapturePage(BasePage):
                 self.busy.hide(); self.busy.lower()
         except Exception:
             pass
-        self._clear_captures()
+        # 촬영 버튼에서는 세션 캡처 초기화를 수행하지 않는다.
+        try: _log.info("[CAP] skip clear on capture-click")
+        except Exception: pass
 
         try:
             raw_dir = Path(r"C:\PhotoBox\raw")
@@ -529,7 +531,10 @@ class CapturePage(BasePage):
         self._overlay_hide()
         self.set_next_enabled(False); self.set_next_mode("disabled")
         self.set_prev_mode("enabled"); self.set_prev_enabled(True)
-        self._shot_index = 0; self._clear_captures()
+        # 촬영 버튼에서는 세션 캡처 초기화를 수행하지 않는다.
+        self._shot_index = 0
+        try: _log.info("[CAP] skip clear on capture-click (shot_index reset only)")
+        except Exception: pass
 
         self._seq_running = False; self._seq_index = -1; self._ready_since = None
         if self._seq_timer.isActive(): self._seq_timer.stop()
@@ -626,6 +631,13 @@ class CapturePage(BasePage):
                 try:
                     rc_code = 0 if ok else -1
                     _log.info("[SHOT] i=%s rc=%s", (i if i is not None else "?"), rc_code)
+                    # 촬영 성공판정을 강제 성공으로 처리하여 파이프라인을 진행한다.
+                    try:
+                        if rc_code != 0:
+                            _log.info("[SHOT] force success pipeline despite rc=%s", rc_code)
+                    except Exception:
+                        pass
+                    ok = True
                 except Exception:
                     pass
             except Exception as e:
@@ -715,12 +727,45 @@ class CapturePage(BasePage):
                 pass
 
     def _save_preview_thumbnail(self) -> Optional[str]:
+        """프리뷰 라벨의 보이는 화면을 캡처해 cap_{idx}.jpg로 저장한다(인덱스는 shot_paths 길이 기준)."""
+        try:
+            pm = self.preview_label.pixmap()
+            if not pm or pm.isNull():
+                return None
+            try:
+                move_idx = int(len(self.session.get("shot_paths", [])))
+            except Exception:
+                move_idx = 0
+            move_idx = max(0, min(3, move_idx))
+            out_dir = CAP_DIR; out_dir.mkdir(parents=True, exist_ok=True)
+            out = out_dir / f"cap_{int(move_idx)+1:02d}.jpg"
+            ok = pm.save(str(out), "JPG", 90)
+            return str(out) if ok else None
+        except Exception:
+            return None
+
+    def _save_preview_thumbnail(self) -> Optional[str]:
         try:
             pm = self.preview_label.pixmap()
             if not pm or pm.isNull(): return None
             out_dir = Path.cwd() / "captures"; out_dir.mkdir(parents=True, exist_ok=True)
             ts = time.strftime("%Y%m%d_%H%M%S"); out = out_dir / f"thumb_{ts}.jpg"
             pm.save(str(out), "JPG", 90); return str(out)
+        except Exception:
+            return None
+
+    def _save_preview_snapshot_indexed(self, idx: int) -> Optional[str]:
+        """프리뷰 라벨의 보이는 화면을 캡처해 cap_{idx}.jpg로 저장한다(지정 인덱스)."""
+        try:
+            pm = self.preview_label.pixmap()
+            if not pm or pm.isNull():
+                return None
+            out_dir = CAP_DIR
+            out_dir.mkdir(parents=True, exist_ok=True)
+            name = f"cap_{int(idx)+1:02d}.jpg"
+            out = out_dir / name
+            ok = pm.save(str(out), "JPG", 90)
+            return str(out) if ok else None
         except Exception:
             return None
 
@@ -1686,13 +1731,55 @@ class CapturePage(BasePage):
             arr = np.frombuffer(data, dtype=np.uint8)
             bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
             if bgr is None:
+                # 폴백: OpenCV 디코딩 실패 시 QImage.fromData로 직접 렌더 시도
+                try:
+                    qi2 = QImage.fromData(data)
+                    if (qi2 is not None) and (not qi2.isNull()):
+                        try:
+                            _log.info("[LV-DECODE] fallback qimage w=%s h=%s", qi2.width(), qi2.height())
+                        except Exception:
+                            pass
+                        # 라이브뷰가 감지되면 Busy 오버레이를 즉시 숨긴다.
+                        try:
+                            if hasattr(self, 'busy') and self.busy.isVisible():
+                                self.busy.hide(); self.busy.lower()
+                        except Exception:
+                            pass
+                        try:
+                            QTimer.singleShot(0, lambda: self._on_qimage(qi2))
+                        except Exception:
+                            try:
+                                self._on_qimage(qi2)
+                            except Exception:
+                                pass
+                        return
+                except Exception:
+                    pass
+                # 디코딩이 모두 실패해도 라이브뷰 신호는 들어오므로 Busy 오버레이는 내린다.
+                try:
+                    if hasattr(self, 'busy') and self.busy.isVisible():
+                        self.busy.hide(); self.busy.lower()
+                except Exception:
+                    pass
                 return
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             h_, w_, _ = rgb.shape
             with self._rgb_lock:
                 self._rgb_latest = rgb
             qi = QImage(rgb.data, w_, h_, 3*w_, QImage.Format_RGB888).copy()
+            # 라이브뷰가 감지되면 Busy 오버레이를 즉시 숨긴다.
+            try:
+                if hasattr(self, 'busy') and self.busy.isVisible():
+                    self.busy.hide(); self.busy.lower()
+            except Exception:
+                pass
         except Exception:
+            # 디코딩 중 예외가 발생해도 Busy 오버레이는 숨겨 사용자 입력을 허용한다.
+            try:
+                if hasattr(self, 'busy') and self.busy.isVisible():
+                    self.busy.hide(); self.busy.lower()
+            except Exception:
+                pass
             return
         try:
             QTimer.singleShot(0, lambda: self._on_qimage(qi))

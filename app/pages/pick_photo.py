@@ -112,6 +112,7 @@ class PickPhotoPage(BasePage):
 
         # 썸네일 4개
         self.thumbs: List[QFrame] = []
+        
         self.thumb_labels: List[QLabel] = []
         for i in range(4):
             f = QFrame(root); f.setObjectName("thumb"); f.setCursor(Qt.PointingHandCursor)
@@ -165,19 +166,40 @@ class PickPhotoPage(BasePage):
     def _apply_thumb_sizes(self) -> None:
         w = self.TOK['thumb_w_3040'] if str(self.session.get("ratio","3040")) == "3040" else self.TOK['thumb_w_3545']
         h = self.TOK['thumb_h']
-        for f in self.thumbs:
+        b = max(1, int(self.TOK.get('border', 2)))
+        for f, lab in zip(self.thumbs, self.thumb_labels):
             f.setFixedSize(w, h)
-
+            try:
+                if f.layout():
+                    f.layout().setContentsMargins(b, b, b, b)
+                lab.setStyleSheet("margin:0; padding:0;")
+                lab.setAlignment(Qt.AlignCenter)
+            except Exception:
+                pass
     # ── 데이터 로드
     def _reload_captures(self) -> None:
+        """캡처 썸네일 목록을 로드하여 상자(2x2)에 순서대로 표시한다.
+        - 우선 session['captures']를 사용한다.
+        - 비어있거나 파일이 없으면 C:\PhotoBox\cap의 cap_01..04.jpg를 자동 탐색해 사용한다.
+        - 그래도 부족하면 thumb_01..04.jpg 플레이스홀더로 채운다.
+        """
+        cap_dir = self.session.get("captures_dir") or os.path.join(PHOTOBOX_ROOT, "cap")
         caps = self.session.get("captures")
         self.captures: List[str] = list(caps) if isinstance(caps, list) else []
+        # 폴백: cap_01..cap_04가 모두 존재하면 이를 사용한다.
+        try:
+            fallback = [f"cap_{i:02d}.jpg" for i in range(1, 5)]
+            need_fallback = (not self.captures) or (not os.path.isfile(self._resolve_path(cap_dir, self.captures[0])))
+            if need_fallback and all(os.path.isfile(os.path.join(cap_dir, nm)) for nm in fallback):
+                self.captures = fallback
+        except Exception:
+            pass
         while len(self.captures) < 4:
             self.captures.append(f"thumb_{len(self.captures)+1:02d}.jpg")
+
         raws = self.session.get("raw_captures")
         self.raw_names: List[str] = list(raws) if isinstance(raws, list) and raws else [f"raw_{i:02d}.jpg" for i in range(1,5)]
 
-        cap_dir = self.session.get("captures_dir") or os.path.join(PHOTOBOX_ROOT, "cap")
         for i, (f, lab) in enumerate(zip(self.thumbs, self.thumb_labels)):
             path = self._resolve_path(cap_dir, self.captures[i])
             self._set_thumb_pix(lab, path)
@@ -192,8 +214,13 @@ class PickPhotoPage(BasePage):
         if not pm.isNull():
             # 라벨 크기에 맞춰 보존 비율 스케일
             sz = label.size() if label.size().width() and label.size().height() else QSize(200, 200)
-            pix = pm.scaled(sz, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            label.setPixmap(pix)
+            w, h = (sz.width(), sz.height())
+            scaled = pm.scaled(w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            if scaled.width() != w or scaled.height() != h:
+                x = max(0, int((scaled.width() - w) / 2))
+                y = max(0, int((scaled.height() - h) / 2))
+                scaled = scaled.copy(x, y, max(1, w), max(1, h))
+            label.setPixmap(scaled)
         else:
             label.setPixmap(QPixmap())  # 회색 배경 + 빈 이미지
 
@@ -267,3 +294,10 @@ class PickPhotoPage(BasePage):
     def sizeHint(self) -> QSize:
         s = float(self.TOK.get("scale", 1.0)) if self.TOK else 1.0
         return QSize(int(900 * s), int(1200 * s))
+
+
+
+
+
+
+

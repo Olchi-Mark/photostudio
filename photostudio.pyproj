@@ -63,6 +63,7 @@
     <Compile Include="app\utils\emailer.py" />
     <Compile Include="app\utils\face_engine.py" />
     <Compile Include="app\utils\image_ops.py" />
+    <Compile Include="app\utils\models\smoke_polygon.py" />
     <Compile Include="app\utils\pose_engine.py" />
     <Compile Include="app\utils\storage.py" />
     <Compile Include="app\__init__.py" />
