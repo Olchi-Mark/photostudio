@@ -171,6 +171,7 @@ class CameraControl:
 
                 backoff = 0.5
                 reapply_done = False
+                last_frame_ts = time.time()
                 while not self._stop.is_set():
 
                     try:
