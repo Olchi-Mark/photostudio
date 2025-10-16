@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 
 from __future__ import annotations
 import os, time, threading, logging
@@ -1111,46 +1111,15 @@ class CapturePage(BasePage):
                         _log.info("[LV] frame w=%s h=%s mode=%s", w, h, mode)
                 except Exception:
                     pass
-            try:
-                if (not getattr(self, "_capturing", False) or getattr(self, "_armed_for_auto", False)) and hasattr(self, 'guide'):
-                    ts = int(time.time() * 1000)
-                    try:
-                        if hasattr(self.guide, 'set_input_source'):
-                            self.guide.set_input_source('sdk' if mode == 'sdk' else 'file')
-                    except Exception:
-                        pass
-                    _, _, _metrics0 = self.guide.update(
-                        pix.toImage() if isinstance(pix, QPixmap) else img,
-                        self.get_ratio(), ts,
-                        getattr(self, 'face', None), getattr(self, 'pose', None)
-                    )
-                    try:
-                        if self._debug:
-                            ts_ms2 = int(time.time() * 1000)
-                            if ts_ms2 - int(getattr(self, '_dbg_last_ms', 0)) >= 1000:
-                                self._dbg_last_ms = ts_ms2
-                                m = _metrics0 or {}
-                                _log.info(
-                                    "[GUD] ready=%s ok=%.2f sh=%.1f eye=%.2f yaw=%.1f pitch=%.1f",
-                                    int(bool(m.get('ready', 0.0))),
-                                    float(m.get('ok_all', 0.0)),
-                                    float(m.get('shoulder_deg', 0.0)),
-                                    float(m.get('eye_h%', 0.0)),
-                                    float(m.get('yaw_deg', 0.0)),
-                                    float(m.get('pitch_deg', 0.0)),
-                                )
-                    except Exception:
-                        pass
-                    try: self._check_auto_sequence(_metrics0)
-                    except Exception: pass
-            except Exception:
-                pass
+            # Guidance는 아래 레이트리미터 구간에서만 실행(중복 호출 제거)
 
-            # Rate-limit guidance to ~10??5Hz
+            # Guidance 레이트리미트(10–15Hz 범위)
             try:
                 ts_ai = int(time.time() * 1000)
-                ai_rate = int(getattr(self, '_ai_rate_ms', 100) or 100)
-                should_ai = (ts_ai - int(getattr(self, '_ai_last_ms', 0) or 0) >= max(66, ai_rate))
+                # 기본 12Hz(≈83ms), 10–15Hz 범위 클램프
+                ai_rate = int(getattr(self, '_ai_rate_ms', 83) or 83)
+                ai_rate = max(66, min(100, ai_rate))
+                should_ai = (ts_ai - int(getattr(self, '_ai_last_ms', 0) or 0) >= ai_rate)
             except Exception:
                 ts_ai, should_ai = int(time.time() * 1000), True
             if should_ai and hasattr(self, 'guide'):
