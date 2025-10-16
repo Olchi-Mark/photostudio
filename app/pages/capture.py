@@ -1630,7 +1630,12 @@ class CapturePage(BasePage):
                         except Exception: pass
             except Exception: pass
             if callable(callback): QTimer.singleShot(0, callback)
-        threading.Thread(target=(_work_unified if (CAP_UNIFIED and CameraControl) else _work), daemon=True).start()
+        # CAP_UNIFIED 경로가 활성화되어도 _work_unified 가 없을 수 있으므로 안전하게 가드한다.
+        try:
+            _target_fn = _work_unified if (CAP_UNIFIED and CameraControl) else _work
+        except NameError:
+            _target_fn = _work
+        threading.Thread(target=_target_fn, daemon=True).start()
 
 
 
