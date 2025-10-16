@@ -1686,6 +1686,26 @@ class CapturePage(BasePage):
             arr = np.frombuffer(data, dtype=np.uint8)
             bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
             if bgr is None:
+                # 순수 OpenCV 경로만 사용: 환경변수 CAP_PURE_OPENCV=1 이면 폴백을 건너뛴다.
+                try:
+                    if str(os.getenv('CAP_PURE_OPENCV', '0')).strip().lower() in ('1','true','on'):
+                        return
+                except Exception:
+                    return
+                # 폴백: OpenCV 디코딩 실패 시 QImage.fromData로 직접 시도한다.
+                try:
+                    qi2 = QImage.fromData(data)
+                    if (qi2 is not None) and (not qi2.isNull()):
+                        try: _log.info("[LV-DECODE] fallback qimage w=%s h=%s", qi2.width(), qi2.height())
+                        except Exception: pass
+                        try:
+                            QTimer.singleShot(0, lambda: self._on_qimage(qi2))
+                        except Exception:
+                            try: self._on_qimage(qi2)
+                            except Exception: pass
+                        return
+                except Exception:
+                    pass
                 return
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             h_, w_, _ = rgb.shape
