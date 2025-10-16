@@ -1127,8 +1127,9 @@ class CapturePage(BasePage):
                     self._ai_last_ms = ts_ai
                     if hasattr(self.guide, 'set_input_source'):
                         self.guide.set_input_source('sdk' if mode == 'sdk' else 'file')
+                    # 단일 디코딩: 원본 QImage(img)만 전달(추가 변환 없음)
                     payload, badges, metrics = self.guide.update(
-                        pix.toImage() if isinstance(pix, QPixmap) else img,
+                        img,
                         self.get_ratio(), ts_ai,
                         getattr(self, 'face', None), getattr(self, 'pose', None)
                     )
