@@ -1305,7 +1305,9 @@ class CapturePage(BasePage):
         except Exception: pass
         try:
             cam = getattr(self, '_cam', None)
-            if cam and hasattr(cam, 'disconnect'):
+            if cam and hasattr(cam, 'shutdown'):
+                cam.shutdown()
+            elif cam and hasattr(cam, 'disconnect'):
                 cam.disconnect()
         except Exception:
             pass

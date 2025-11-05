@@ -57,6 +57,20 @@ class CameraControl:
             pass
         self._b.disconnect()
 
+    def shutdown(self) -> None:
+        """카메라 연결을 완전 종료한다(disconnect + SDK release)."""
+        try:
+            self.stop_liveview()
+        except Exception:
+            pass
+        try:
+            if hasattr(self._b, 'close'):
+                self._b.close()
+            else:
+                self._b.disconnect()
+        except Exception:
+            pass
+
     def set_save_dir(self, path: str, retries: int = 3, delay_ms: int = 200, timeout_s: float = 3.0) -> bool:
         """?????嚥▲굧???뚪뜮?熬곣벀嫄????繹먮냱???嶺뚮㉡?????????꿔꺂??????????덊떀, ?????????."""
         self._last_dir = str(path or "") or None
