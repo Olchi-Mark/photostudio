@@ -506,18 +506,7 @@ class CapturePage(BasePage):
                     _log.info("[SDK] set_save_dir rc=%s path=%s", ok_set, str(raw_dir))
                 except Exception:
                     pass
-            # 폴백: ctypes 경로로 재시도
-            if not ok_set:
-                # 폴백: ctypes 브리지 경로로 저장 디렉터리 설정 시도
-                try:
-                    rc_fb = cam_sdk.set_save_dir(None, str(raw_dir))
-                except Exception:
-                    rc_fb = -1
-                try:
-                    _log.info("[SDK] set_save_dir rc=%s path=%s (fallback)", rc_fb, str(raw_dir))
-                except Exception:
-                    pass
-                ok_set = (rc_fb == 0 or rc_fb is True)
+            # 폴백 경로 제거: 핸들 없이 저장 설정 호출은 수행하지 않는다.
             if ok_set:
                 self._save_dir_set = True
         except Exception:
