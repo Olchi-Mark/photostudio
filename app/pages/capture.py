@@ -848,6 +848,10 @@ class CapturePage(BasePage):
                 return p
         except Exception:
             pass
+        try:
+            _log.info("[SAVE] last_saved not found via SDK/Bridge (dir=%s)", r"C:\\PhotoBox\\raw")
+        except Exception:
+            pass
         return None
 
     def _poll_new_jpeg(self, since: float, timeout_s: float = 3.0, interval_s: float = 0.2) -> Optional[str]:
@@ -1086,6 +1090,14 @@ class CapturePage(BasePage):
                         if hasattr(cam, 'set_save_dir'):
                             try: cam.set_save_dir(raw_dir)
                             except Exception: pass
+                        # Unified 경로에서도 카드 저장+PC 프록시 저장을 활성화한다.
+                        try:
+                            if hasattr(cam, 'set_save_and_proxy'):
+                                ok_sp = bool(cam.set_save_and_proxy(True, True))
+                                try: _log.info("[SAVE] set_save_and_proxy rc=%s", ok_sp)
+                                except Exception: pass
+                        except Exception:
+                            pass
                         ms = self._tok_ms_sdk()
                     except Exception:
                         ms = 33

@@ -84,6 +84,11 @@ class CameraControl:
         return self._enqueue_cmd(cmd, timeout_s=timeout_s, default=None)
 
 
+    def set_save_and_proxy(self, save_to_card: bool = True, proxy_to_pc: bool = True, timeout_s: float = 2.0) -> bool:
+        """카드 저장/PC 프록시 저장 옵션을 설정한다."""
+        cmd: Dict[str, Any] = {"op": "save_proxy", "save_to_card": bool(save_to_card), "proxy_to_pc": bool(proxy_to_pc)}
+        return bool(self._enqueue_cmd(cmd, timeout_s=timeout_s, default=False))
+
     def _enqueue_cmd(self, cmd: Dict[str, Any], timeout_s: float, default: Any):
         """????????????影?れ쉠???? ?鶯ㅺ동????궰??嚥▲굧?????ル벥嫄????뚯????β뼯猷????살퓢??"""
         evt = threading.Event()
@@ -215,6 +220,10 @@ class CameraControl:
                                     res = self._b.get_last_saved_jpeg()
                                 except Exception:
                                     res = None
+                                try:
+                                    _log.info("[SAVE] last_saved path=%s", str(res))
+                                except Exception:
+                                    pass
                             elif op == "af":
                                 try:
                                     rc = self._b.one_shot_af()
@@ -235,6 +244,23 @@ class CameraControl:
                                 except Exception:
                                     pass
                                 res = rc
+                            elif op == "save_proxy":
+                                try:
+                                    stc = 1 if bool(cmd.get("save_to_card", True)) else 0
+                                    ptp = 1 if bool(cmd.get("proxy_to_pc", True)) else 0
+                                    ok = False
+                                    if hasattr(self._b, 'set_save_and_proxy'):
+                                        try:
+                                            ok = bool(self._b.set_save_and_proxy(bool(stc), bool(ptp)))
+                                        except Exception:
+                                            ok = False
+                                    res = bool(ok)
+                                    try:
+                                        _log.info("[SAVE] set_save_and_proxy stc=%s ptp=%s rc=%s", stc, ptp, res)
+                                    except Exception:
+                                        pass
+                                except Exception:
+                                    res = False
 
                             box["res"] = res
                             evt = box.get("evt")
