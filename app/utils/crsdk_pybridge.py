@@ -34,6 +34,9 @@ def error_name(rc: int) -> str:
 if _sym("crsdk_init"):               _d.crsdk_init.restype = c_int
 if _sym("crsdk_release"):            _d.crsdk_release.restype = None
 if _sym("crsdk_connect_first"):      _d.crsdk_connect_first.argtypes = [POINTER(c_void_p)]; _d.crsdk_connect_first.restype = c_int
+if _sym("crsdk_connect_usb_serial"):
+    _d.crsdk_connect_usb_serial.argtypes = [c_char_p, POINTER(c_void_p)]
+    _d.crsdk_connect_usb_serial.restype  = c_int
 if _sym("crsdk_disconnect"):         _d.crsdk_disconnect.argtypes = [c_void_p]; _d.crsdk_disconnect.restype = None
 
 if _sym("crsdk_set_download_dir"):   _d.crsdk_set_download_dir.argtypes = [c_char_p]; _d.crsdk_set_download_dir.restype = c_int
@@ -74,6 +77,18 @@ def connect_first() -> c_void_p | None:
     if not f: return None
     out = c_void_p()
     rc = int(f(C.byref(out)))
+    return out if rc == 0 and out.value else None
+
+def connect_usb_serial(serial: str) -> c_void_p | None:
+    """USB 시리얼(12자)로 연결 시도. 실패 시 None."""
+    f = _sym("crsdk_connect_usb_serial")
+    if not f or not serial:
+        return None
+    out = c_void_p()
+    try:
+        rc = int(f(serial.encode("ascii", errors="ignore"), C.byref(out)))
+    except Exception:
+        return None
     return out if rc == 0 and out.value else None
 
 def disconnect(h: c_void_p | None) -> None:

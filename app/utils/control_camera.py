@@ -135,7 +135,24 @@ class CameraControl:
         try:
             h0 = getattr(self._b, "h", None)
             if not h0 or not getattr(h0, "value", None):
-                self._b.connect_first()
+                # 환경변수 CAP_USB_SERIAL(12자리)가 있으면 우선 해당 시리얼로 연결을 시도한다.
+                try:
+                    _ser = os.environ.get("CAP_USB_SERIAL", "").strip()
+                except Exception:
+                    _ser = ""
+                if _ser:
+                    try:
+                        from .crsdk_pybridge import connect_usb_serial as _conn_ser
+                        _h = _conn_ser(_ser)
+                        if _h and getattr(_h, 'value', None):
+                            self._b.h = _h
+                            _log.info("[CAM] connect by USB serial=%s ok", _ser)
+                        else:
+                            _log.info("[CAM] connect by USB serial=%s failed; fallback to first", _ser)
+                    except Exception:
+                        pass
+                if not getattr(getattr(self._b, 'h', None), 'value', None):
+                    self._b.connect_first()
         except Exception:
             pass
         h0 = getattr(self._b, "h", None)
