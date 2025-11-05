@@ -257,16 +257,7 @@ class SDKCamera:
             name = _errname(int(rc_info)) if rc_info not in (0, None) else "OK"
         except Exception:
             name = "?"
-        # 상태 비트/콜백 에러도 함께 남겨 진단에 도움을 준다.
-        try:
-            st = _d.crsdk_status(self.h) if getattr(self, 'h', None) else 0
-        except Exception:
-            st = 0
-        try:
-            lce = _d.crsdk_last_cb_error(self.h) if getattr(self, 'h', None) else 0
-        except Exception:
-            lce = 0
-        _log.info("[SDK] set_save_dir rc_info=%s(%s) rc_dl=%s status=0x%X last_cb_err=%s path=%s", rc_info, name, rc_dl, int(st), lce, path)
+        _log.info("[SDK] set_save_dir rc_info=%s(%s) rc_dl=%s path=%s", rc_info, name, rc_dl, path)
         return (rc_info == 0 and rc_dl == 0)
 
     def get_last_saved_path(self) -> Optional[str]:
