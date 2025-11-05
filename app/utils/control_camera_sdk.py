@@ -55,6 +55,14 @@ try:
 except AttributeError:
     _HAS_SAVE_DIR = False
 
+# optional: preset host save dir
+try:
+    _d.crsdk_preset_host_save_dir.argtypes = [C.c_void_p, C.c_char_p]
+    _d.crsdk_preset_host_save_dir.restype  = C.c_int
+    _HAS_PRESET_SAVE = True
+except AttributeError:
+    _HAS_PRESET_SAVE = False
+
 try:
     _d.crsdk_get_last_saved_jpeg.argtypes = [C.c_void_p, C.c_wchar_p, C.c_uint]
     _d.crsdk_get_last_saved_jpeg.restype  = C.c_int
@@ -236,15 +244,28 @@ class SDKCamera:
         rc_info = -1
         try:
             if getattr(self, "h", None) and self.h.value:
+                # 1) 옵션: preset host save (환경변수 CAP_PRESET_SAVE=1일 때만)
+                use_preset = False
                 try:
-                    _d.crsdk_set_save_info.argtypes = [C.c_void_p, C.c_int, C.c_char_p, C.c_char_p]
-                    _d.crsdk_set_save_info.restype = C.c_int
+                    use_preset = str(os.environ.get("CAP_PRESET_SAVE", "0")).strip().lower() in ("1","true","on")
                 except Exception:
-                    pass
-                try:
-                    rc_info = int(_d.crsdk_set_save_info(self.h, 2, path.encode("utf-8", errors="ignore"), None))
-                except Exception:
-                    rc_info = -1
+                    use_preset = False
+                if use_preset and '_HAS_PRESET_SAVE' in globals() and _HAS_PRESET_SAVE:
+                    try:
+                        rc_info = int(_d.crsdk_preset_host_save_dir(self.h, path.encode("utf-8", errors="ignore")))
+                    except Exception:
+                        rc_info = -1
+                # 2) 폴백: 기존 SetSaveInfo 경로
+                if rc_info != 0:
+                    try:
+                        _d.crsdk_set_save_info.argtypes = [C.c_void_p, C.c_int, C.c_char_p, C.c_char_p]
+                        _d.crsdk_set_save_info.restype = C.c_int
+                    except Exception:
+                        pass
+                    try:
+                        rc_info = int(_d.crsdk_set_save_info(self.h, 2, path.encode("utf-8", errors="ignore"), None))
+                    except Exception:
+                        rc_info = -1
         except Exception:
             rc_info = -1
 
@@ -324,3 +345,5 @@ class ControlCameraSDK(SDKCamera):
     pass
 
 __all__ += ['CRSDKBridge', 'ControlCameraSDK']
+
+
