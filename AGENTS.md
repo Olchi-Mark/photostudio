@@ -1,16 +1,42 @@
-프로젝트 코딩 지침
+# Repository Guidelines
 
-- 식별자 안정성: 함수명/클래스명/공개 인터페이스를 임의로 변경하지 않습니다. 다른 파일/모듈과의 호환성을 항상 유지합니다.
-- 주석 규칙: 모든 `class`, `method`, `function` . 주석은 반드시 한국어로 작성합니다.
-- 디버깅 메시지: 기능이 작동하지 않는 이유를 추적하기 쉽도록 적절한 디버깅 메시지를 콘솔로 출력되게 합니다. 단, 출력 방식은 
-- 인코딩: 모든 소스/문서 파일은 UTF-8 인코딩을 사용합니다.
--.
-- 참조: 자세한 로깅/스타일/예외 처리 등은 `CODING.md`를 우선 참조합니다. 충돌 시 `CODING.md`의 규칙을 우선 적용합니다.
+This guide applies to the entire repository tree. If a deeper directory contains its own AGENTS.md, that file takes precedence. For detailed logging, style, and exception handling, prefer CODING.md when present.
 
-예시 (한국어 주석)
+## Project Structure & Module Organization
+- `src/` — application code, grouped by domain (e.g., `src/editor/`, `src/importer/`).
+- `tests/` — unit/integration tests mirroring `src/` paths.
+- `assets/` — static media (sample photos, icons); do not embed secrets.
+- `scripts/` — repeatable CLI tasks; keep idempotent.
+- `docs/` — architecture notes and ADRs.
 
-- Python: `# 사용자의 세션을 초기화한다.`
-- JavaScript/TypeScript: `// 장바구니 총액을 계산한다.`
-- Java/C#: `// 데이터베이스 연결을 생성하고 반환한다.`
+## Build, Test, and Development Commands
+Use the toolchain that exists in this repo (check `package.json`, `pyproject.toml`, or `*.sln`). Examples:
+- Node: `npm ci` · `npm run build` · `npm test` · `npm run dev`
+- Python: install (`uv/poetry/pip`) then `pytest` · run: `python -m photostudio`
+- .NET: `dotnet restore` · `dotnet build` · `dotnet test` · `dotnet run`
 
-본 지침은 이 디렉터리 트리 전반에 적용됩니다.
+## Coding Style & Naming Conventions
+- Identifier stability: do not rename public functions/classes/exports without discussion.
+- Comments for every class/method/function must be written in Korean. Example (Python): `# 사용자의 세션을 초기화한다.`
+- Encoding: UTF-8 for all source and docs.
+- Naming: snake_case (Python functions), camelCase (JS/TS functions), PascalCase (classes), kebab-case for web asset filenames unless stack dictates otherwise.
+- Run configured formatters/linters (e.g., `black`/`ruff`, `eslint`/`prettier`) using repo settings.
+
+## Testing Guidelines
+- Place tests under `tests/`, mirroring `src/` (e.g., `tests/editor/test_crop.py`, `__tests__/editor/crop.test.ts`).
+- Add tests for new/changed code and for bug regressions.
+- Aim for meaningful coverage; keep tests fast and deterministic.
+- Run the stack-appropriate test command before pushing.
+
+## Commit & Pull Request Guidelines
+- Prefer Conventional Commits: `feat: …`, `fix: …`, `docs: …`, `refactor: …`.
+- PRs must include: clear description, linked issues, screenshots for UI changes, and repro steps for bugfixes.
+- Keep diffs focused; avoid unrelated refactors.
+
+## Security & Configuration Tips
+- Never commit secrets; use `.env.local`. Document required vars in `.env.example`.
+- Emit useful console debug messages to trace failures; follow CODING.md for verbosity/format.
+
+## Agent-Specific Instructions
+- Respect this AGENTS.md; deeper files override locally.
+- Scan for existing patterns before large edits; update docs/tests alongside code changes.

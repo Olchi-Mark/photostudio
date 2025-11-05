@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 
 from __future__ import annotations
 import os, time, threading, logging
@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional, Dict
 from app.utils import control_camera_sdk as cam_sdk
 
-from PySide6.QtCore import Qt, QTimer, QRect
+from PySide6.QtCore import Qt, QTimer, QRect, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QApplication,
     QPushButton, QButtonGroup, QLabel
@@ -128,6 +128,8 @@ class Toast(QWidget):
         self.lbl.setGeometry(0, 0, w, h)
         self.show(); self.raise_(); self._timer.start()
 class CapturePage(BasePage):
+    # 프레임 전달을 위한 UI 스레드 시그널
+    frameReady = Signal(QImage)
     __doc__ = "Capture page: camera preview and shooting UI."
     def __init__(self, theme, session: dict, parent=None):
         super().__init__(theme, steps=STEPS, active_index=2, parent=parent)
@@ -188,12 +190,21 @@ class CapturePage(BasePage):
         self._seq_timer.timeout.connect(self._tick_seq_countdown)
         self._last_qimage_log_ms = 0
         self._seq_count_left = 0
+        # 카운트다운 표시 활성 플래그(중복 호출 방지용)
+        self._countdown_active = False
         self._connecting = False
-        # 연결 시작 중복 방지를 위한 락/디바운스 상태
+        # 연결 시도 중복 방지를 위한 락/디바운싱 상태
         self._connect_lock = threading.Lock()
         self._last_connect_ms = 0
 
         self._lv_status_hooked = False
+        # 연결 처리 중복(inflight) 상태 플래그
+        self._conn_inflight = False
+        # AF 사용 여부 설정(CAP_USE_AF=1이면 AF 시도)
+        try:
+            self._use_af = str(os.getenv("CAP_USE_AF", "0")).strip().lower() in ("1","true","on")
+        except Exception:
+            self._use_af = False
         self._rebuild_layout_tokens(); self._apply_layout_tokens()
 
         try:
@@ -205,6 +216,15 @@ class CapturePage(BasePage):
 
         self.setCentralWidget(center, margin=(0,0,0,0), spacing=0, center=False, max_width=None)
         self.set_prev_mode("enabled"); self.set_next_mode("disabled"); self.set_next_enabled(False)
+        # frameReady 시그널을 UI 스레드로 안전하게 연결(QueuedConnection 권장)
+        # 프레임 시그널을 UI 슬롯에 연결(Queue 방식)
+        try:
+            try:
+                self.frameReady.connect(self._on_qimage, Qt.ConnectionType.QueuedConnection)
+            except Exception:
+                self.frameReady.connect(self._on_qimage)
+        except Exception:
+            pass
 
         self._read_ratio()
 
@@ -256,7 +276,7 @@ class CapturePage(BasePage):
 
         self._ai_rate_ms = 500; self._ai_last_ms = 0; self._ema: Dict[str, float] = {}
         self.guide = Guidance(rate_ms=500)
-        # Guidance 입력 최신 프레임 버퍼(ndarray)와 틱 타이머(10–15Hz)
+        # Guidance 입력 최신 프레임 버퍼(ndarray)와 처리 주기(10~15Hz)
         self._rgb_latest = None
         self._rgb_lock = threading.Lock()
         self._ai_timer = QTimer(self)
@@ -302,6 +322,7 @@ class CapturePage(BasePage):
                     self.toast.popup(text or "")
                 except Exception:
                     pass
+            # Guidance 호출 조건 계산(중복 호출 방지) 및 주기(약 10~15Hz)
                 return
             if hasattr(self.overlay, "set_badge_center"):
                 try: self.overlay.set_badge_center(True)
@@ -443,16 +464,14 @@ class CapturePage(BasePage):
         except Exception: pass
 
     def _on_capture_clicked(self):
+        # 캡처 버튼 클릭 처리: 중복 클릭 방지 및 저장 경로 설정
+        # 캡처 버튼 클릭 처리: 중복 클릭 방지 및 저장 경로 설정
         
         try:
             _log.info("[BTN] capture clicked armed=%s capturing=%s", getattr(self, "_armed_for_auto", False), getattr(self, "_capturing", False))
         except Exception:
             pass
-        try:
-            if str(os.getenv("CAP_DEBUG", "1")).strip() == "1" and hasattr(self, "toast"):
-                self.toast.popup("BTN")
-        except Exception:
-            pass
+        # 디버그 토스트("BTN")는 비활성화한다.
         if self._capturing: return
         self._overlay_from_button = True
         self._armed_for_auto = True
@@ -464,27 +483,39 @@ class CapturePage(BasePage):
         self._clear_captures()
 
         try:
-            raw_dir = Path(r"C:\PhotoBox\raw")
+            raw_dir = Path(r"C:\\PhotoBox\\raw")
             raw_dir.mkdir(parents=True, exist_ok=True)
-            cam = getattr(self.lv, 'cam', None) or getattr(self, '_cam', None) or self.lv
-            if hasattr(cam, 'set_save_dir'):
+            # Unified: CameraControl 인스턴스만 사용한다.
+            # Unified 경로: CameraControl 인스턴스를 우선 사용한다.
+            cam = getattr(self, '_cam', None)
+            ok_set = False
+            if cam and hasattr(cam, 'set_save_dir'):
                 try:
-                    cam.set_save_dir(str(raw_dir))
+                    ok_set = bool(cam.set_save_dir(str(raw_dir)))
+                except Exception:
+                    ok_set = False
+                try:
+                    _log.info("[SDK] set_save_dir rc=%s path=%s", ok_set, str(raw_dir))
                 except Exception:
                     pass
+            # 폴백: ctypes 경로로 재시도
+            if not ok_set:
+                # 폴백: ctypes 브리지 경로로 저장 디렉터리 설정 시도
                 try:
-                    _log.info("[SDK] set_save_dir rc=? path=%s", str(raw_dir))
+                    rc_fb = cam_sdk.set_save_dir(None, str(raw_dir))
+                except Exception:
+                    rc_fb = -1
+                try:
+                    _log.info("[SDK] set_save_dir rc=%s path=%s (fallback)", rc_fb, str(raw_dir))
                 except Exception:
                     pass
-            else:
-                rc = cam_sdk.set_save_dir(None, str(raw_dir))
-                try:
-                    _log.info("[SDK] set_save_dir rc=%s path=%s", rc, str(raw_dir))
-                except Exception:
-                    pass
+                ok_set = (rc_fb == 0 or rc_fb is True)
+            if ok_set:
+                self._save_dir_set = True
         except Exception:
             pass
         self._lock_ui_for_capture(True)
+        # 자동 시퀀스 시작: 캡처 진행 오버레이 표시 및 프리뷰/오버레이 최상위로 정렬
         
         
         try:
@@ -507,6 +538,17 @@ class CapturePage(BasePage):
             pass
 
 
+        try:
+            # CAP_FORCE_SEQ=1 이면 4장 연속 촬영(첫 5초, 이후 3초 간격)
+            # CAP_FORCE_SEQ=1이면 4컷 자동 시퀀스를 강제로 실행(첫 5초, 이후 3초 간격)
+            force_seq = str(os.getenv("CAP_FORCE_SEQ", "1")).strip().lower() in ("1","true","on")
+        except Exception:
+            force_seq = True
+        try:
+            if force_seq:
+                self._start_auto_sequence(); return
+        except Exception:
+            pass
         try:
             self._seq_running = False
             self._seq_index = -1
@@ -560,32 +602,44 @@ class CapturePage(BasePage):
     def _tick_countdown(self):
         self._count_left -= 1
         try:
-            if self._count_left == 3:
+            if self._count_left == 3 and getattr(self, '_use_af', False):
                 self._try_af_async()
         except Exception:
             pass
         try:
-            if CAP_OVERLAY_OFF and self._count_left > 0:
-                self.toast.popup(f"COUNTDOWN T-{int(self._count_left)}s")
-            self._overlay_badge("GUIDE ARMED")
+            # 프리뷰 중앙 숫자(흰색) 표시: 오버레이 활성 시 남은 초를 중앙에 크게 띄운다.
+            if self._count_left > 0:
+                self._countdown_active = True
+                if not CAP_OVERLAY_OFF:
+                    self._overlay_badge(str(int(self._count_left)))
+                else:
+                    self.toast.popup(f"COUNTDOWN T-{int(self._count_left)}s")
         except Exception:
             pass
         if self._count_left > 0: return
-        self._count_timer.stop(); self._invoke_shoot(i=0)
+        self._count_timer.stop(); self._countdown_active = False; self._invoke_shoot(i=0)
 
     def _tick_seq_countdown(self):
         self._seq_count_left -= 1
 
         try:
-            if CAP_OVERLAY_OFF and self._seq_count_left > 0:
-                self.toast.popup(f"COUNTDOWN T-{int(self._seq_count_left)}s")
+            if self._seq_count_left > 0:
+                self._countdown_active = True
+                if not CAP_OVERLAY_OFF:
+                    if int(self._seq_count_left) <= 2:
+                        self._overlay_badge(str(int(self._seq_count_left)))
+                    else:
+                        self._overlay_badge("")
+                else:
+                    if int(self._seq_count_left) <= 2:
+                        self.toast.popup(f"COUNTDOWN T-{int(self._seq_count_left)}s")
         except Exception:
             pass
-        if self._seq_count_left == 1:
+        if self._seq_count_left == 1 and getattr(self, '_use_af', False):
             try:
                 self._try_af_async(idx=(getattr(self, "_seq_index", -1) + 1))
             except Exception:
-                self._try_af_async()
+                pass
         if self._seq_count_left <= 0:
             next_i = self._seq_index + 1
             self._seq_timer.stop()
@@ -595,17 +649,25 @@ class CapturePage(BasePage):
         def _work():
             ok = False; path = None; err = ""
             try:
-                cam = getattr(self.lv, 'cam', None) or getattr(self, '_cam', None)
+                # Unified: CameraControl을 사용하여 촬영한다.
+                cam = getattr(self, '_cam', None)
                 t_mark = time.time()
-                if cam and hasattr(cam, "shoot_one"):
-                    res = cam.shoot_one()
-                    if isinstance(res, dict):
-                        ok = bool(res.get("ok", False)); path = res.get("path") or res.get("file")
-                    elif isinstance(res, (list, tuple)):
-                        ok = bool(res[0]); path = (res[1] if len(res)>1 else None)
-                    elif isinstance(res, bool): ok = res
-                    elif isinstance(res, int):  ok = (res == 0)
-                    if ok and not path:
+                # Dry-run 토글: CAP_DRY_SHOT=1이면 네이티브 촬영 호출을 건너뛰고 UI/캡처만 수행한다.
+                try:
+                    dry = str(os.getenv("CAP_DRY_SHOT", "0")).strip().lower() in ("1","true","on")
+                except Exception:
+                    dry = False
+
+                if dry:
+                    rc = 0; ok = True
+                elif cam and hasattr(cam, "shoot_one"):
+                    try:
+                        rc = int(cam.shoot_one())
+                    except Exception:
+                        rc = -1
+                    ok = (rc == 0)
+                    if ok:
+                        # 최근 저장 파일을 우선 조회하고, 없으면 폴링으로 확보한다.
                         try:
                             p1 = self._try_fetch_last_saved(cam)
                         except Exception:
@@ -618,14 +680,13 @@ class CapturePage(BasePage):
                         if p1:
                             path = p1
                 else:
-                    if hasattr(self.lv, "shoot_one"):
-                        rc = self.lv.shoot_one()  # 0 == OK
-                        ok = (rc == 0)
-                    else:
-                        err = "shoot api not available"
+                    err = "shoot api not available"
                 try:
                     rc_code = 0 if ok else -1
-                    _log.info("[SHOT] i=%s rc=%s", (i if i is not None else "?"), rc_code)
+                    try:
+                        _log.info("[SHOT] i=%s rc=%s%s", (i if i is not None else "?"), rc_code, " (dry)" if dry else "")
+                    except Exception:
+                        _log.info("[SHOT] i=%s rc=%s", (i if i is not None else "?"), rc_code)
                 except Exception:
                     pass
             except Exception as e:
@@ -636,16 +697,19 @@ class CapturePage(BasePage):
 
     def _on_shoot_done(self, ok: bool, path: Optional[str], err: str="", idx: Optional[int]=None):
         thumb_path: Optional[str] = None
+        # 인덱스를 먼저 계산한다(캡처 파일 cap_XX 저장에 사용).
+        try:
+            move_idx = int(idx) if idx is not None else int(len(self.session.get("shot_paths", [])))
+        except Exception:
+            move_idx = 0
+        # 촬영 성공 여부와 무관하게 프리뷰 스크린샷(cap_XX)을 우선 저장한다.
+        try:
+            thumb_path = self._save_preview_snapshot_indexed(move_idx)
+        except Exception:
+            thumb_path = self._save_preview_thumbnail()
         if ok:
             if not getattr(self, "_seq_running", False):
                 pass  # keep liveview after shot
-            if not thumb_path:
-                thumb_path = self._save_preview_thumbnail()
-                thumb_path = self._save_preview_thumbnail()
-            try:
-                move_idx = int(idx) if idx is not None else int(len(self.session.get("shot_paths", [])))
-            except Exception:
-                move_idx = 0
             try:
                 if path:
                     new_path = self._move_capture_to_raw(move_idx, path)
@@ -716,7 +780,7 @@ class CapturePage(BasePage):
 
     def _save_preview_thumbnail(self) -> Optional[str]:
         try:
-            pm = self.preview_label.pixmap()
+            pm = self.preview_label.grab()
             if not pm or pm.isNull(): return None
             out_dir = Path.cwd() / "captures"; out_dir.mkdir(parents=True, exist_ok=True)
             ts = time.strftime("%Y%m%d_%H%M%S"); out = out_dir / f"thumb_{ts}.jpg"
@@ -726,12 +790,13 @@ class CapturePage(BasePage):
 
     def _save_preview_snapshot_indexed(self, idx: int) -> Optional[str]:
         try:
-            pm = self.preview_label.pixmap()
+            pm = self.preview_label.grab()
             if not pm or pm.isNull():
                 return None
             out_dir = Path(r"C:\PhotoBox\cap")
             out_dir.mkdir(parents=True, exist_ok=True)
-            name = f"thumb_{int(idx)+1:02d}.jpg"
+            # 요구사항: cap_01.jpg ~ cap_04 저장
+            name = f"cap_{int(idx)+1:02d}.jpg"
             out = out_dir / name
             ok = pm.save(str(out), "JPG", 90)
             return str(out) if ok else None
@@ -743,7 +808,7 @@ class CapturePage(BasePage):
             src = Path(src_path)
             if not src.exists() or not src.is_file():
                 return None
-            raw_dir = Path(r"C:\PhotoBox\raw")
+            raw_dir = Path(r"C:\\PhotoBox\\raw")
             raw_dir.mkdir(parents=True, exist_ok=True)
             dest = raw_dir / f"raw_{int(idx)+1:02d}.jpg"
             try:
@@ -794,7 +859,7 @@ class CapturePage(BasePage):
     def _poll_new_jpeg(self, since: float, timeout_s: float = 3.0, interval_s: float = 0.2) -> Optional[str]:
         t0 = time.time()
         candidates = [
-            Path(r"C:\PhotoBox\raw"),
+            Path(r"C:\\PhotoBox\\raw"),
             Path(r"C:\PhotoBox\JPG"),
             Path(r"C:\PhotoBox"),
         ]
@@ -942,15 +1007,22 @@ class CapturePage(BasePage):
         self._refresh_settings_tokens()
         try:
             self.lv.configure(self._tok_lv_dir(), self._tok_ms_sdk(), self._tok_ms_file())
-            try: _log.info("[SET] ?????????????????????????????dir=%s ms_sdk=%s ms_file=%s", self._tok_lv_dir(), self._tok_ms_sdk(), self._tok_ms_file())
+            try: _log.info("[SET] configure dir=%s ms_sdk=%s ms_file=%s", self._tok_lv_dir(), self._tok_ms_sdk(), self._tok_ms_file())
             except Exception: pass
         except Exception as e:
-            try: _log.error("[SET] ??????????????????????????????????????????????? %s", e)
+            try: _log.error("[SET] configure failed: %s", e)
             except Exception: pass
 
     def _connect_camera_async(self):
+        # 연결 시도 디바운싱 및 중복 실행 방지 (중복 호출/빈번 호출)
+        # 연결 시도 디바운싱 및 중복 실행 방지 (기능 동일, 주석 보정)
         # 연결 시작 디바운스(중복 호출/경합 방지)
         now_ms = int(time.time() * 1000)
+        # 이미 연결 시도가 진행 중이면 드랍한다.
+        if getattr(self, "_conn_inflight", False):
+            try: _log.debug("[CONN] start drop: inflight")
+            except Exception: pass
+            return
         if (now_ms - int(getattr(self, "_last_connect_ms", 0))) < 300:
             try: _log.debug("[CONN] start drop: debounced (<300ms)")
             except Exception: pass
@@ -962,6 +1034,7 @@ class CapturePage(BasePage):
                 return
             self._connecting = True
             self._last_connect_ms = now_ms
+            self._conn_inflight = True
         self.busy.setText("Connecting camera...")
         self.set_led_mode('off')
 
@@ -982,7 +1055,7 @@ class CapturePage(BasePage):
             ok = False
             try:
                 try:
-                    _log.info("[CONN] start enter")
+                    _log.info("[CONN] start enter (legacy)")
                 except Exception:
                     pass
                 ok = bool(self.lv.start(on_qimage=self._on_qimage))
@@ -999,6 +1072,9 @@ class CapturePage(BasePage):
                     self.set_led_mode('off')
                     self.busy.setText("Camera connection failed")
                     QTimer.singleShot(1300, self.busy.hide)
+                # inflight 종료(성공/실패 공통)
+                try: self._conn_inflight = False
+                except Exception: pass
             QTimer.singleShot(0, _done)
 
         def _work_unified():
@@ -1036,39 +1112,42 @@ class CapturePage(BasePage):
                     self.set_led_mode('off')
                     self.busy.setText("Camera connection failed")
                     QTimer.singleShot(1300, self.busy.hide)
+                # inflight 종료(성공/실패 공통)
+                try: self._conn_inflight = False
+                except Exception: pass
             QTimer.singleShot(0, _done)
         # 스레드 기동 단일화: CAP_UNIFIED이면 unified만, 아니면 legacy만 실행
-        if CAP_UNIFIED and CameraControl:
-            threading.Thread(target=_work_unified, daemon=True).start()
-        else:
-            threading.Thread(target=_work, daemon=True).start()
+        # 런타임 분기: CAP_UNIFIED이면 unified 경로를 사용(legacy는 비활성)
+        # 런타임 분기: CAP_UNIFIED이면 unified 경로 사용(legacy 비활성)
+        threading.Thread(target=_work_unified, daemon=True).start()
 
-        def _guard():
-            try:
-                if getattr(self, "_connecting", False):
-                    # 연결 경과 알림(12초) 로그는 소음이므로 비활성화
-                    # _log.warning("[CONN] 12s elapsed: still connecting")
-            except Exception:
-                pass
-        QTimer.singleShot(12000, _guard)
 
     def _on_qimage(self, img: QImage):
+        # 첫 프레임 수신 시 연결 오버레이/LED 상태 초기화 및 로그 출력.
+        # 첫 프레임 수신 시 연결 오버레이/LED 상태를 초기화하고 로그를 남긴다.
         if not self._first_frame_seen:
             self._first_frame_seen = True
             self._conn_timer.stop()
             self._hide_connect_overlay()
             # 첫 프레임 수신 시 연결 진행 플래그 해제(싱글플라이트 종료)
+            # 첫 프레임 수신 시 플래그/LED 정리
             try:
                 if getattr(self, '_connecting', False):
                     self._connecting = False
             except Exception:
                 self._connecting = False
-            try: _log.info("[LV] first frame received")
-            except Exception: pass
+            try:
+                self.set_led_mode('sdk')
+            except Exception:
+                pass
+            try:
+                _log.info("[LV] first frame received")
+            except Exception:
+                pass
 
         try:
             w, h = self.preview_label.width(), self.preview_label.height()
-            mode = getattr(self.lv, 'mode', 'off')
+            mode = 'sdk'
             try:
                 if mode == 'sdk' and not getattr(self, '_save_dir_set', False):
                     from pathlib import Path as _P
@@ -1079,19 +1158,6 @@ class CapturePage(BasePage):
                         self._save_dir_set = True
                         try: _log.info("[SAVE] dir=%s", r"C:\\PhotoBox\\raw")
                         except Exception: pass
-                try:
-                    from pathlib import Path as _P
-                    _raw = _P(r"C:\\PhotoBox\\raw"); _raw.mkdir(parents=True, exist_ok=True)
-                except Exception:
-                    pass
-                if hasattr(cam, 'set_save_dir'):
-                    try:
-                        cam.set_save_dir(r"C:\\PhotoBox\\raw")
-                        self._save_dir_set = True
-                        try: _log.info("[SAVE] dir=%s", r"C:\\PhotoBox\\raw")
-                        except Exception: pass
-                    except Exception:
-                        pass
             except Exception:
                 pass
 
@@ -1104,9 +1170,12 @@ class CapturePage(BasePage):
                     pix = QPixmap.fromImage(img).scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 except Exception:
                     pix = QPixmap()
-
             if not pix.isNull():
                 self.preview_label.setPixmap(pix)
+                try:
+                    self.set_led_mode('sdk')
+                except Exception:
+                    pass
                 try:
                     if hasattr(self, 'busy') and self.busy.isVisible():
                         self.busy.hide(); self.busy.lower()
@@ -1135,6 +1204,7 @@ class CapturePage(BasePage):
                     self._ai_last_ms = ts_ai
                     if hasattr(self.guide, 'set_input_source'):
                         self.guide.set_input_source('sdk' if mode == 'sdk' else 'file')
+                    # 입력 전달: 원본 QImage(img) 전달(추가 변환 불필요)
                     # 단일 디코딩: 원본 QImage(img)만 전달(추가 변환 없음)
                     payload, badges, metrics = self.guide.update(
                         img,
@@ -1149,9 +1219,12 @@ class CapturePage(BasePage):
                     try:
                         if hasattr(self, '_guidance_message') and hasattr(self.overlay, 'update_badges'):
                             msg = self._guidance_message(metrics)
-                            self.overlay.update_badges("", {})
+                            # 카운트다운 중에는 배지 클리어를 건너뜀(숫자 유지)
+                            if not getattr(self, '_countdown_active', False):
+                                self.overlay.update_badges("", {})
                         elif hasattr(self.overlay, 'update_badges'):
-                            self.overlay.update_badges("", {})
+                            if not getattr(self, '_countdown_active', False):
+                                self.overlay.update_badges("", {})
                     except Exception:
                         pass
                     try:
@@ -1234,7 +1307,7 @@ class CapturePage(BasePage):
             if self._lv_status_hooked and hasattr(self.lv, "statusChanged"):
                 try: self.lv.statusChanged.disconnect(self._on_lv_status)
                 except Exception: pass
-                self._lv_status_hooked = False
+            self._lv_status_hooked = False
         except Exception: pass
         try:
             if hasattr(self, 'lv') and self.lv: self.lv.stop()
@@ -1550,12 +1623,32 @@ class CapturePage(BasePage):
         self._seq_index = -1
         self._clear_captures()
         self._lock_ui_for_capture(True)
-        self._overlay_show_during_capture()
+        # 카운트다운 시작을 위해 오버레이를 전면에 강제로 표시
         try:
-            _log.info("[SEQ] start first=5s")
+            self._overlay_show_during_capture()
+            if hasattr(self, 'busy'):
+                try: self.busy.hide()
+                except Exception: pass
+            try:
+                # 프리뷰 위에 오버레이가 오도록 순서 보장
+                self.preview_label.raise_()
+                self.overlay.raise_()
+            except Exception:
+                pass
         except Exception:
             pass
-        self._count_left = 5
+        try:
+            _log.info("[SEQ] start first=4s")
+        except Exception:
+            pass
+        # 첫 컷 카운트다운 활성화 및 숫자(4) 배지 표시
+        self._countdown_active = True
+        self._count_left = 4
+        try:
+            if not CAP_OVERLAY_OFF:
+                self._overlay_badge("4")
+        except Exception:
+            pass
         if not self._count_timer.isActive():
             self._count_timer.start()
 
@@ -1603,7 +1696,7 @@ class CapturePage(BasePage):
         self._clear_captures()
         self._lock_ui_for_capture(True)
         self._overlay_show_during_capture()
-        self._count_left = 5
+        self._count_left = 4
         if not self._count_timer.isActive():
             self._count_timer.start()
 
@@ -1700,12 +1793,12 @@ class CapturePage(BasePage):
                     return
                 # 폴백: OpenCV 디코딩 실패 시 QImage.fromData로 직접 시도한다.
                 try:
-                    qi2 = QImage.fromData(data)
+                    qi2 = QImage.fromData(data, "JPG")
                     if (qi2 is not None) and (not qi2.isNull()):
                         try: _log.info("[LV-DECODE] fallback qimage w=%s h=%s", qi2.width(), qi2.height())
                         except Exception: pass
                         try:
-                            QTimer.singleShot(0, lambda: self._on_qimage(qi2))
+                            self.frameReady.emit(qi2)
                         except Exception:
                             try: self._on_qimage(qi2)
                             except Exception: pass
@@ -1721,7 +1814,7 @@ class CapturePage(BasePage):
         except Exception:
             return
         try:
-            QTimer.singleShot(0, lambda: self._on_qimage(qi))
+            self.frameReady.emit(qi)
         except Exception:
             try:
                 self._on_qimage(qi)
