@@ -1665,34 +1665,7 @@ class CapturePage(BasePage):
                 pass
         threading.Thread(target=_run, daemon=True).start()
 
-    def _check_auto_sequence(self, metrics: dict):
-        if getattr(self, "_seq_running", False) or getattr(self, "_capturing", False):
-            return
-        ready = False
-        try:
-            ready = bool(metrics.get("ready", False))
-        except Exception:
-            ready = False
-        now = time.time()
-        if ready:
-            if getattr(self, "_ready_since", None) is None:
-                self._ready_since = now
-            elif (now - float(self._ready_since)) >= 0.8:
-                self._start_auto_sequence()
-        else:
-            self._ready_since = None
-
-    def _start_auto_sequence(self):
-        if getattr(self, "_seq_running", False):
-            return
-        self._seq_running = True
-        self._seq_index = -1
-        self._clear_captures()
-        self._lock_ui_for_capture(True)
-        self._overlay_show_during_capture()
-        self._count_left = 4
-        if not self._count_timer.isActive():
-            self._count_timer.start()
+    
 
     
 
