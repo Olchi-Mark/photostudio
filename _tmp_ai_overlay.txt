@@ -1,0 +1,333 @@
+"""
+app/ui/ai_overlay.py ???ˆì •??ë²„ì „(?˜ì¸???•ê·œ??
+??• : ?¼ì´ë¸Œë·° ?„ì— ê°€?´ë“œ/ë§ˆìŠ¤???œë“œë§ˆí¬ë¥?ê·¸ë¦¬???¤ë²„?ˆì´ ?„ì ¯
+
+ê·œì¹™
+- paintEvent ?´ë??ì„œ??QPainter ë³€??`qp`ë§??¬ìš©?œë‹¤.
+- paintEvent ì¤?geometry/show/update ?¸ì¶œ ê¸ˆì?(ê¹œë¹¡?„Â·ì¬ì§„ì… ë°©ì?).
+- ë³´ì¡° ê·¸ë¦¬ê¸??¨ìˆ˜????QPainterë¥?ë§Œë“¤ì§€ ?Šê³  ?„ë‹¬ë°›ì? `qp`ë§??¬ìš©?œë‹¤.
+"""
+
+from __future__ import annotations
+
+from typing import Optional, Tuple, Dict, Any, Iterable
+
+from PySide6.QtCore import Qt, QRectF, QPointF
+from PySide6.QtGui import QPainter, QPen, QPainterPath, QColor
+from PySide6.QtWidgets import QWidget, QVBoxLayout
+
+
+class OverlayCanvas(QWidget):
+    """ì¹´ë©”???„ë¦¬ë·??„ì— ê°€?´ë“œë¥?ê·¸ë¦¬???˜ì¸???„ìš© ?„ì ¯."""
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self._ratio: Tuple[int, int] = (3, 4)
+        self._hole_rect: Optional[QRectF] = None
+        self._TOK: Dict[str, Any] = {
+            "mask_color": (238, 238, 238, 255),
+            "guide_color": (255, 255, 255, 180),
+            "stroke": 3,
+            "round": 0,
+            "dash_guide": True,
+            "dash_color": (204, 204, 204, 255),
+            "dash_width": 1,
+            "show_guide": False,
+            # ?œë“œë§ˆí¬ ?‰ìƒ
+            "pt_core": (46, 125, 50, 230),
+            "pt_chin": (76, 175, 80, 230),
+            "pt_eye": (3, 169, 244, 230),
+            "pt_nose": (67, 160, 71, 230),
+            "pt_shoulder": (255, 215, 64, 230),
+            "pt_pro": (255, 255, 255, 90),
+        }
+        self._lm_payload: Optional[Dict[str, Any]] = None
+        self._lm_normalized: bool = False
+        self._dbg_cross: bool = False
+        self._badge_text: str = ""
+
+    # ?¤ì •/? í° ----------------------------------------------------------------
+    def refresh_tokens(self, TOK: dict) -> None:
+        """? í° ê°??ìš© ??ë¦¬í˜?¸íŠ¸ ?”ì²­."""
+        self._TOK.update(TOK or {})
+        self.update()
+
+    def set_debug_cross(self, enable: bool) -> None:
+        """?”ë²„ê·??????œì‹œ ? ê?."""
+        self._dbg_cross = bool(enable)
+        self.update()
+
+    def set_mask_color(self, rgb=(255, 255, 255), alpha: int = 26) -> None:
+        """ë§ˆìŠ¤???‰ìƒ???¤ì •?œë‹¤(QColor ?ëŠ” (r,g,b))."""
+        if isinstance(rgb, QColor):
+            c = rgb
+            self._TOK["mask_color"] = (c.red(), c.green(), c.blue(), c.alpha())
+        else:
+            r, g, b = rgb
+            a = int(max(0, min(255, alpha)))
+            self._TOK["mask_color"] = (int(r), int(g), int(b), a)
+        self.update()
+
+    def set_badge(self, text: str) -> None:
+        """?¤ë²„?ˆì´ ?ë‹¨ ë°°ì? ë¬¸êµ¬ ?¤ì •."""
+        self._badge_text = str(text or "")
+        self.update()
+
+    # ?œë“œë§ˆí¬ -----------------------------------------------------------------
+    def clear_landmarks(self) -> None:
+        """?œë“œë§ˆí¬/?•ê·œ???Œë˜ê·?ì´ˆê¸°??"""
+        self._lm_payload = None
+        self._lm_normalized = False
+        self.update()
+
+    def set_landmarks(self, payload: dict, normalized: bool = False) -> None:
+        """?œë“œë§ˆí¬/?•ê·œ???Œë˜ê·??¤ì •."""
+        self._lm_payload = payload or None
+        self._lm_normalized = bool(normalized)
+        self.update()
+
+    # ë¹„ìœ¨/?€ ------------------------------------------------------------------
+    def set_ratio(self, w: int, h: int) -> None:
+        """ê°€?´ë“œ ë¹„ìœ¨???¤ì •?œë‹¤."""
+        if w > 0 and h > 0:
+            self._ratio = (int(w), int(h))
+            self.update()
+
+    def set_hole_rect(self, rect: Optional[QRectF]) -> None:
+        """?„ë¦¬ë·??ì—­(hole) ?¬ê°?•ì„ ?¤ì •?œë‹¤."""
+        self._hole_rect = rect
+        self.update()
+
+    # ? í‹¸ ---------------------------------------------------------------------
+    def _rgba(self, tup: Tuple[int, int, int, int]) -> QColor:
+        r, g, b, a = tup
+        return QColor(int(r), int(g), int(b), int(a))
+
+    def _map_pt(self, p: Tuple[float, float], hole: QRectF, normalized: bool) -> QPointF:
+        x, y = float(p[0]), float(p[1])
+        if normalized:
+            return QPointF(hole.left() + x * hole.width(), hole.top() + y * hole.height())
+        return QPointF(hole.left() + x, hole.top() + y)
+
+    def _paint_landmarks(self, qp: QPainter, hole: QRectF) -> None:
+        """?œë“œë§ˆí¬ë¥?qpë¡?ê·¸ë¦°?????˜ì¸???ì„± ê¸ˆì?)."""
+        payload = self._lm_payload or {}
+        normalized = self._lm_normalized
+
+        def draw_pts(pts: Optional[Iterable[Tuple[float, float]]], color_rgba, w: int = 3):
+            if not pts:
+                return
+            pen = QPen(self._rgba(color_rgba))
+            pen.setWidth(w)
+            qp.setPen(pen)
+            qp.setBrush(Qt.NoBrush)
+            for p in pts:
+                pt = self._map_pt(p, hole, normalized)
+                qp.drawPoint(pt)
+
+        if payload.get("pro_mesh"):
+            draw_pts(payload.get("pro_mesh"), self._TOK.get("pt_pro"), 1)
+        chin = payload.get("chin_ring")
+        draw_pts(chin, self._TOK.get("pt_chin"), 2)
+        eye = payload.get("eye_support") or {}
+        draw_pts(eye.get("left"), self._TOK.get("pt_eye"), 2)
+        draw_pts(eye.get("right"), self._TOK.get("pt_eye"), 2)
+        draw_pts(payload.get("nose_support"), self._TOK.get("pt_nose"), 2)
+        spts = payload.get("shoulder_support")
+        draw_pts(spts, self._TOK.get("pt_shoulder"), 2)
+        core = payload.get("core") or {}
+        if isinstance(core, dict):
+            draw_pts(core.values(), self._TOK.get("pt_core"), 3)
+        else:
+            draw_pts(core, self._TOK.get("pt_core"), 3)
+
+    # ?˜ì¸??-------------------------------------------------------------------
+    def paintEvent(self, ev) -> None:  # noqa
+        """qp ?˜ë‚˜ë§??¬ìš©. paint ì¤?geometry/show/update ?¸ì¶œ ê¸ˆì?."""
+        qp = QPainter()
+        if not qp.begin(self):
+            return
+        try:
+            try:
+                qp.setRenderHint(QPainter.Antialiasing, True)
+            except Exception:
+                pass
+
+            # ?„ìš” ??holeë§?ê°±ì‹ (geometry ë³€ê²½ì? paint?ì„œ ê¸ˆì?)
+            try:
+                if hasattr(self, "_recalc_hole_from_widget"):
+                    self._recalc_hole_from_widget()
+            except Exception:
+                pass
+
+            W, H = self.width(), self.height()
+            if self._hole_rect is not None:
+                guide_rect = QRectF(self._hole_rect)
+            else:
+                rw, rh = self._ratio
+                target_h = H
+                target_w = int(target_h * rw / rh)
+                if target_w > W:
+                    target_w = W
+                    target_h = int(target_w * rh / rw)
+                x = (W - target_w) // 2
+                y = (H - target_h) // 2
+                guide_rect = QRectF(x, y, target_w, target_h)
+
+            # ë§ˆìŠ¤??ì±„ìš°ê¸?ê°€?´ë“œ ?œì™¸)
+            mc = self._TOK.get("mask_color", (238, 238, 238, 255))
+            hole = self._hole_rect
+            # êµ¬ë©(hole)??? íš¨?˜ì? ?Šìœ¼ë©??„ë¬´ ê²ƒë„ ê·¸ë¦¬ì§€ ?ŠëŠ”??ê¸°ë³¸ ?¬ëª…)
+            if hole is None or hole.width() <= 0 or hole.height() <= 0:
+                return
+            outer = QPainterPath()
+            outer.addRect(0, 0, float(W), float(H))
+            radius = float(self._TOK.get("round", 0))
+            hole_path = QPainterPath()
+            if radius > 0:
+                hole_path.addRoundedRect(hole, radius, radius)
+            else:
+                hole_path.addRect(hole)
+            outer.addPath(hole_path)
+            outer.setFillRule(Qt.OddEvenFill)
+            qp.fillPath(outer, self._rgba(mc))
+
+            # ê°€?´ë“œ ?¬ê°???µì…˜)
+            if bool(self._TOK.get("show_guide", False)):
+                gc = self._TOK.get("guide_color", (255, 255, 255, 180))
+                dashed = bool(self._TOK.get("dash_guide", False))
+                color = self._TOK.get("dash_color", (204, 204, 204, 255)) if dashed else gc
+                width = int(self._TOK.get("dash_width", 1)) if dashed else int(self._TOK.get("stroke", 3))
+                pen = QPen(self._rgba(color))
+                pen.setWidth(width)
+                if dashed:
+                    pen.setStyle(Qt.DashLine)
+                    try:
+                        pen.setDashPattern([6, 4])
+                    except Exception:
+                        pass
+                qp.setPen(pen)
+                qp.setBrush(Qt.NoBrush)
+                if radius > 0:
+                    qp.drawRoundedRect(guide_rect, radius, radius)
+                else:
+                    qp.drawRect(guide_rect)
+
+            # ?”ë²„ê·??????µì…˜)
+            if self._dbg_cross:
+                center = guide_rect.center()
+                pen = QPen(self._rgba((255, 0, 0, 255)))
+                pen.setWidth(2)
+                qp.setPen(pen)
+                qp.drawLine(center.x() - 24, center.y(), center.x() + 24, center.y())
+                qp.drawLine(center.x(), center.y() - 24, center.x(), center.y() + 24)
+
+            # ?œë“œë§ˆí¬
+            if self._lm_payload:
+                self._paint_landmarks(qp, guide_rect)
+
+            # ë°°ì? ?ìŠ¤??            if self._badge_text:
+                pen = QPen(QColor(255, 255, 255, 230))
+                pen.setWidth(1)
+                qp.setPen(pen)
+                align = Qt.AlignCenter if bool(self._TOK.get("badge_center", False)) else (Qt.AlignLeft | Qt.AlignTop)
+                # ¹èÁö¸¦ Á¤È®È÷ Áß¾Ó¿¡ µÎ±â À§ÇØ ÆĞµùÀ» Á¦°ÅÇÑ´Ù.
+                qp.drawText((QRectF(self._hole_rect) if (self._hole_rect is not None and self._hole_rect.width() > 0 and self._hole_rect.height() > 0) else guide_rect).adjusted(0, 0, 0, 0), align, self._badge_text)
+        except Exception as ex:
+            print("[OV] paint error:", ex)
+        finally:
+            if qp.isActive():
+                qp.end()
+
+
+class AiOverlay(QWidget):
+    """ìº¡ì²˜ ?˜ì´ì§€?ì„œ ?¬ìš©?˜ëŠ” ?¤ë²„?ˆì´ ?˜í¼ ?„ì ¯(?ˆì •??."""
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("AiOverlay")
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self._overlay = OverlayCanvas(self)
+        lay.addWidget(self._overlay, 1)
+        self._hole_widget = None
+        self._hole_shrink = 0
+        self._hole_rect: Optional[QRectF] = None
+
+    # capture.py?ì„œ ê¸°ë??˜ëŠ” API ------------------------------------------------
+    def refresh_tokens(self, tok: dict) -> None:
+        self._overlay.refresh_tokens(tok or {})
+
+    def set_mask_color(self, rgb=(238, 238, 238), alpha: int = 255) -> None:
+        self._overlay.set_mask_color(rgb, alpha)
+
+    def set_ratio(self, w: int, h: int) -> None:
+        self._overlay.set_ratio(w, h)
+
+    def set_ratio_from_session(self, ratio: str) -> None:
+        if str(ratio) == "3545":
+            self.set_ratio(35, 45)
+        else:
+            self.set_ratio(3, 4)
+
+    def bind_hole_widget(self, widget, shrink_px: int = 0) -> None:
+        self._hole_widget = widget
+        self._hole_shrink = int(shrink_px)
+        self._hole_rect = None
+        self.update()
+
+    def update_badges(self, text: str, _metrics: dict) -> None:
+        self._overlay.set_badge(text or "")
+
+    def update_landmarks(self, payload: dict, normalized: bool = False) -> None:
+        self._overlay.set_landmarks(payload, normalized)
+
+    def set_debug_cross(self, enable: bool) -> None:
+        """Áß¾Ó ½ÊÀÚ µğ¹ö±× Ç¥½Ã¸¦ ÄÒ´Ù/²ö´Ù."""
+        self._overlay.set_debug_cross(enable)
+
+    def set_badge_center(self, on: bool = True) -> None:
+        """¹èÁö ÅØ½ºÆ®¸¦ Áß¾Ó Á¤·Ä·Î Ç¥½ÃÇÑ´Ù."""
+        self._overlay.refresh_tokens({"badge_center": bool(on)})
+
+    # ?´ë? ? í‹¸ ------------------------------------------------------------------
+    # ¹ÙÀÎµùµÈ À§Á¬ÀÇ ÁÂÇ¥¸¦ ¿À¹ö·¹ÀÌ ÁÂÇ¥·Î º¯È¯ÇÏ¿© È¦ »ç°¢ÇüÀ» °»½ÅÇÑ´Ù.
+    def _recalc_hole_from_widget(self) -> None:
+        try:
+            if self._hole_widget is not None:
+                w = self._hole_widget
+                r = w.geometry()
+                # ?„ì—­ ì¢Œí‘œë¡?ë³€???? ?¤ë²„?ˆì´ ì¢Œí‘œë¡??????                g_tl = w.mapToGlobal(r.topLeft())
+                g_br = w.mapToGlobal(r.bottomRight())
+                tl = self.mapFromGlobal(g_tl)
+                br = self.mapFromGlobal(g_br)
+                from PySide6.QtCore import QRect
+                rect = QRect(tl, br)
+                s = int(self._hole_shrink or 0)
+                if s > 0:
+                                    rect.adjust(s, s, -s, -s)
+                # ¿ÀÇÁ¼Â º¸Á¤: ±âº» -2px, È¯°æº¯¼ö PS_HOLE_OFF·Î ¿À¹ö¶óÀÌµå
+                try:
+                    import os as _os
+                    _off = int(str(_os.getenv("PS_HOLE_OFF", "-2")).strip())
+                except Exception:
+                    _off = -2
+                rect.adjust(_off, _off, 0, 0)
+                self._overlay.set_hole_rect(rect)
+                # z-¼ø¼­ ÃÖ»ó´Ü À¯Áö ½Ãµµ
+                try:
+                    self.raise_()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def resizeEvent(self, ev) -> None:  # noqa: N802
+        super().resizeEvent(ev)
+        self._recalc_hole_from_widget()
+
+
+

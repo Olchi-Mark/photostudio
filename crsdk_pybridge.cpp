@@ -2,6 +2,16 @@
 // Build: x64, C++17, /MD, Unicode
 // Include: <SDK>\app\CRSDK   Link: Cr_Core.lib
 
+// 보안/매크로 충돌 방지 매크로를 가장 먼저 선언한다.
+// - _CRT_SECURE_NO_WARNINGS: MSVC의 getenv 보안 경고(C4996) 무시
+// - NOMINMAX: <windows.h>에서 정의하는 min/max 매크로로 인한 std::min/max 충돌 방지
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS 1
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX 1
+#endif
+
 #include <windows.h>
 #include <cstdint>
 #include <cwchar>
@@ -10,6 +20,9 @@
 #include <atomic>
 #include <new>
 #include <cstring>
+#include <algorithm>   // std::max
+#include <cctype>      // std::tolower / ::tolower
+#include <cwctype>     // std::towlower
 #include <vector>
 #include <cstdio>
 #include <io.h>
@@ -41,6 +54,45 @@ static inline bool is_disconnected(SCRSDK::CrError e) {
 static std::wstring g_download_dir = L"C\\:\\PhotoBox\\raw"; // 기본값
 static std::wstring g_last_saved;
 static std::mutex   g_dl_mu;
+
+// ===== LiveView JPEG 가드: SOI~EOI 추출 + (옵션) DHT 삽입 =====
+static inline long long _env_i64(const char* k, long long d) {
+    if (const char* v = std::getenv(k)) { try { return std::stoll(v); } catch (...) {} }
+    return d;
+}
+static inline bool _env_on(const char* k, bool d=false) {
+    if (const char* v = std::getenv(k)) {
+        std::string s(v); for (auto& c: s) c = (char)tolower((unsigned char)c);
+        return (s=="1"||s=="true"||s=="on");
+    }
+    return d;
+}
+
+// 간단 기본 DHT 테이블(예시). 필요시 실제 표준 DHT로 교체 가능.
+static const unsigned char kDefaultDHT_[] = {
+    0xFF,0xC4,0x00,0x1F, 0x00,0x00,0x01,0x05,0x01,0x01,0x01,0x01,0x01,0x01,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00
+};
+static bool _has_DHT(const unsigned char* p, size_t n) {
+    for (size_t i=0;i+1<n;++i) if (p[i]==0xFF && p[i+1]==0xC4) return true; return false;
+}
+// SOI~EOI 구간만 추출. 필요 시 SOI 뒤에 기본 DHT 삽입.
+static bool _extract_jpeg_guarded(const unsigned char* in, size_t inlen,
+                                  std::vector<unsigned char>& out) {
+    if (!in || inlen < 4) return false;
+    size_t soi=(size_t)-1; for (size_t i=0;i+1<inlen;++i){ if(in[i]==0xFF && in[i+1]==0xD8){ soi=i; break; } }
+    if (soi==(size_t)-1) return false;
+    size_t eoi=(size_t)-1; for (size_t j=soi+2;j+1<inlen;++j){ if(in[j]==0xFF && in[j+1]==0xD9){ eoi=j+2; break; } }
+    if (eoi==(size_t)-1 || eoi<=soi) return false;
+    size_t seg = eoi - soi; if (seg < 2048) return false;
+    out.assign(in+soi, in+eoi);
+    if (_env_on("CAP_INJECT_DHT", true) && !_has_DHT(out.data(), out.size())) {
+        if (out.size()>2 && out[0]==0xFF && out[1]==0xD8) {
+            out.insert(out.begin()+2, std::begin(kDefaultDHT_), std::end(kDefaultDHT_));
+        }
+    }
+    return true;
+}
 
 
 // ===== helpers =====
@@ -512,7 +564,16 @@ extern "C" {
         SCRSDK::CrImageInfo info{};
         SCRSDK::CrError er = SCRSDK::GetLiveViewImageInfo(ctx->dev, &info);
         if (er != SCRSDK::CrError_None) { *out_nbytes = 0; dlog(L"GetLVInfo er=%d", (int)er); return (int)er; }
-        *out_nbytes = (unsigned)info.GetBufferSize(); return 0;
+        // 라이브뷰 초기에 SDK가 매우 작은 크기를 보고하는 경우가 있어 최소값을 강제한다.
+        // - CRSDK_LV_MIN_BUF 환경변수로 오버라이드 가능(기본 256KB)
+        // - 프레임가드(DHT) 활성 시 64바이트 여유
+        unsigned need = (unsigned)info.GetBufferSize();
+        unsigned min_need = (unsigned)_env_i64("CRSDK_LV_MIN_BUF", 256u * 1024u);
+        if (need < min_need) need = min_need;
+        if (_env_on("CRSDK_LV_GUARD", true) && _env_on("CAP_INJECT_DHT", true)) { need += 64u; }
+        *out_nbytes = need;
+        dlog(L"GetLVInfo bytes=%u(min=%u)", (unsigned)info.GetBufferSize(), need);
+        return 0;
     }
 
     // 컨테이너에서 실제 JPEG만 복사해 주는 버전
@@ -520,15 +581,31 @@ extern "C" {
         CamCtx* ctx = reinterpret_cast<CamCtx*>(handle);
         if (!ctx || !ctx->dev || !out_buf || !out_used) return -2;
 
-        std::vector<CrInt8u> tmp(buf_size);
+        // SDK 요구 버퍼 크기 확인 후 내부 스크래치 버퍼를 충분히 확보한다.
+        SCRSDK::CrImageInfo info{}; (void)SCRSDK::GetLiveViewImageInfo(ctx->dev, &info);
+        unsigned need_sdk = (unsigned)info.GetBufferSize();
+        unsigned min_scratch = (unsigned)_env_i64("CRSDK_LV_SCRATCH", 512u*1024u); // 기본 512KB
+        unsigned scratch_sz = (std::max)((std::max)(buf_size, need_sdk), min_scratch);
+
+        std::vector<CrInt8u> tmp(scratch_sz);
         SCRSDK::CrImageDataBlock blk;
         blk.SetData(tmp.data());
-        blk.SetSize((CrInt32u)buf_size);
+        blk.SetSize((CrInt32u)scratch_sz);
 
-        SCRSDK::CrError er = SCRSDK::GetLiveViewImage(ctx->dev, &blk);
+        // 라이브뷰 프레임은 시점에 따라 일시적으로 실패할 수 있으므로 짧게 재시도한다.
+        SCRSDK::CrError er = (SCRSDK::CrError)0;
+        int max_try = (int)_env_i64("CRSDK_LV_TRIES", 20);
+        DWORD slp = (DWORD)_env_i64("CRSDK_LV_SLEEP_MS", 30);
+        for (int t = 0; t < max_try; ++t) {
+            er = SCRSDK::GetLiveViewImage(ctx->dev, &blk);
+            if (er == SCRSDK::CrError_None) break;
+            if (is_disconnected(er)) { *out_used = 0; dlog(L"GetLVImage disconnected er=%d", (int)er); return (int)er; }
+            // 짧게 대기 후 재시도(초기 프레임/버퍼 전환 등 대비)
+            Sleep(slp);
+        }
         if (er != SCRSDK::CrError_None) {
             *out_used = 0;
-            dlog(L"GetLVImage er=%d", (int)er);
+            dlog(L"GetLVImage er=%d after %d tries", (int)er, max_try);
             return (int)er;
         }
 
@@ -536,9 +613,27 @@ extern "C" {
         CrInt32u jpeg_size = blk.GetImageSize();        // JPEG 바이트 수
         if (!jpeg_ptr || jpeg_size <= 0) { *out_used = 0; return 0; }
 
-        if ((unsigned)jpeg_size > buf_size) jpeg_size = (CrInt32u)buf_size;
-        std::memcpy(out_buf, jpeg_ptr, (size_t)jpeg_size);
-        *out_used = (unsigned)jpeg_size;
+        // 프레임가드: SOI~EOI 추출 + (옵션) DHT 삽입 적용 시도
+        if (_env_on("CRSDK_LV_GUARD", true)) {
+            std::vector<unsigned char> guarded;
+            if (_extract_jpeg_guarded(reinterpret_cast<const unsigned char*>(jpeg_ptr), (size_t)jpeg_size, guarded)) {
+                if (guarded.size() <= buf_size) {
+                    std::memcpy(out_buf, guarded.data(), guarded.size());
+                    *out_used = (unsigned)guarded.size();
+                    dlog(L"LV guard OK: in=%u out=%u", (unsigned)jpeg_size, (unsigned)guarded.size());
+                    return 0;
+                }
+                dlog(L"LV guard overflow: need=%u buf=%u -> fallback raw", (unsigned)guarded.size(), buf_size);
+            }
+            else {
+                dlog(L"LV guard failed to extract JPEG (in=%u)", (unsigned)jpeg_size);
+            }
+        }
+
+        unsigned to_copy = (unsigned)jpeg_size;
+        if (to_copy > buf_size) { dlog(L"LV raw truncate: in=%u buf=%u", to_copy, buf_size); to_copy = buf_size; }
+        if (to_copy) std::memcpy(out_buf, jpeg_ptr, (size_t)to_copy);
+        *out_used = to_copy;
         return 0;
     }
 

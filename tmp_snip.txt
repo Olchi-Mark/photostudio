@@ -1,0 +1,16 @@
+﻿def _save_preview_snapshot_indexed(self, idx: int) -> Optional[str]:
+        try:
+            pm = self.preview_label.pixmap()
+            if not pm or pm.isNull():
+                return None
+            out_dir = Path(r"C:\PhotoBox\cap")
+            out_dir.mkdir(parents=True, exist_ok=True)
+            # 요구사항: cap_01.jpg ~ cap_04 저장
+            name = f"cap_{int(idx)+1:02d}.jpg"
+            out = out_dir / name
+            ok = pm.save(str(out), "JPG", 90)
+            return str(out) if ok else None
+        except Exception:
+            return None
+
+    

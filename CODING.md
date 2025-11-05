@@ -9,7 +9,7 @@
 - Python: logging 사용. print 금지.
   format: "%(asctime)s %(levelname)s %(name)s:%(lineno)d - %(message)s"
   진입, 주요 분기, 외부 I/O, 예외에서 INFO/ERROR 기록.
-  루프는 1초당 1회 이하.
+  
 - C++: LOG_I/LOG_E 매크로로 기록. std::cout 직접 사용 금지.
 
 ## 에러 처리
