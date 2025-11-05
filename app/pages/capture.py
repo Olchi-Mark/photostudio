@@ -289,6 +289,14 @@ class CapturePage(BasePage):
         self._ai_timer.timeout.connect(self._ai_tick)
         self._ai_timer.start()
 
+        # 프로그램 종료 시 카메라/라이브뷰를 안전하게 종료한다.
+        try:
+            app = QApplication.instance()
+            if app and hasattr(app, 'aboutToQuit'):
+                app.aboutToQuit.connect(self._stop_camera)
+        except Exception:
+            pass
+
 
         try:
             if CAP_OVERLAY_OFF:
@@ -1318,6 +1326,16 @@ class CapturePage(BasePage):
         try:
             if hasattr(self, 'lv') and self.lv: self.lv.stop()
         except Exception: pass
+        try:
+            cam = getattr(self, '_cam', None)
+            if cam and hasattr(cam, 'disconnect'):
+                cam.disconnect()
+        except Exception:
+            pass
+        try:
+            self._cam = None
+        except Exception:
+            pass
         self.set_led_mode('off')
         self._show_placeholder()
     

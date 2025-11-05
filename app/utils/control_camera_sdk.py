@@ -232,7 +232,28 @@ class SDKCamera:
 
     def set_save_dir(self, path: str) -> bool:
         """다운로드 저장 경로 설정에 대한 별칭."""
-        return self.set_download_dir(path)
+        rc_info = -1
+        try:
+            if getattr(self, "h", None) and self.h.value:
+                try:
+                    _d.crsdk_set_save_info.argtypes = [C.c_void_p, C.c_int, C.c_char_p, C.c_char_p]
+                    _d.crsdk_set_save_info.restype = C.c_int
+                except Exception:
+                    pass
+                try:
+                    rc_info = int(_d.crsdk_set_save_info(self.h, 2, path.encode("utf-8", errors="ignore"), None))
+                except Exception:
+                    rc_info = -1
+        except Exception:
+            rc_info = -1
+
+        rc_dl = -1
+        try:
+            rc_dl = _safe_set_download_dir(path)
+        except Exception:
+            rc_dl = -1
+        _log.info("[SDK] set_save_dir rc_info=%s rc_dl=%s path=%s", rc_info, rc_dl, path)
+        return (rc_info == 0 and rc_dl == 0)
 
     def get_last_saved_path(self) -> Optional[str]:
         """최근 저장된 JPEG 경로를 반환한다."""
