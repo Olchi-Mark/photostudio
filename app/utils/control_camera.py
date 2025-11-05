@@ -200,8 +200,9 @@ class CameraControl:
                                     _log.error("[SAVE] set_save_dir failed dir=%s", path)
                                 res = bool(ok)
                             elif op == "shoot_one":
+                                # 촬영 결과 규약 통일: 0=성공, 그 외=실패
                                 try:
-                                    rc = int(self._b.shoot_one())
+                                    rc = 0 if bool(self._b.shoot_one()) else -1
                                 except Exception:
                                     rc = -1
                                 try:
@@ -335,7 +336,7 @@ class CameraControl:
                         try:
                             if ts_ms - int(self._last_log_ms or 0) >= 1000:
                                 self._last_log_ms = ts_ms
-                                _log.info("[CAM] frame bytes=%s mode=%s", len(data), meta.get("mode", "sdk"))
+                                _log.debug("[CAM] frame bytes=%s mode=%s", len(data), meta.get("mode", "sdk"))
                         except Exception:
                             pass
 
@@ -372,3 +373,4 @@ class CameraControl:
 
 
 __all__ = ["CRSDKBridge", "CameraControl"]
+
