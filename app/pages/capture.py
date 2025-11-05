@@ -1151,18 +1151,7 @@ class CapturePage(BasePage):
         try:
             w, h = self.preview_label.width(), self.preview_label.height()
             mode = 'sdk'
-            try:
-                if mode == 'sdk' and not getattr(self, '_save_dir_set', False):
-                    from pathlib import Path as _P
-                    _raw = _P(r"C:\\PhotoBox\\raw"); _raw.mkdir(parents=True, exist_ok=True)
-                    cam = getattr(self.lv, 'cam', None) or getattr(self, '_cam', None) or self.lv
-                    if hasattr(cam, 'set_save_dir'):
-                        cam.set_save_dir(r"C:\\PhotoBox\\raw")
-                        self._save_dir_set = True
-                        try: _log.info("[SAVE] dir=%s", r"C:\\PhotoBox\\raw")
-                        except Exception: pass
-            except Exception:
-                pass
+            # 저장 경로 설정은 연결 직후(unified 경로) 1회만 수행한다.
 
             pix = QPixmap()
             try:
