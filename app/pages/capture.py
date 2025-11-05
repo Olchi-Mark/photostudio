@@ -1022,9 +1022,12 @@ class CapturePage(BasePage):
                     self._lv_status_hooked = True
             except Exception: pass
 
+        # Legacy 경로 설정은 CAP_UNIFIED 비활성 시에만 수행한다.
         try:
-            self.lv.configure(self._tok_lv_dir(), self._tok_ms_sdk(), self._tok_ms_file(), fallback_ms=3000)
-        except Exception: pass
+            if not CAP_UNIFIED and hasattr(self, 'lv') and self.lv:
+                self.lv.configure(self._tok_lv_dir(), self._tok_ms_sdk(), self._tok_ms_file(), fallback_ms=3000)
+        except Exception:
+            pass
 
         def _work():
             ok = False
@@ -1062,6 +1065,10 @@ class CapturePage(BasePage):
                     except Exception:
                         cam = None; self._cam = None
                 if cam is not None:
+                    try:
+                        _log.info("[CONN] unified path selected (CAP_UNIFIED=1)")
+                    except Exception:
+                        pass
                     try:
                         raw_dir = str(Path(r"C:\\PhotoBox\\raw")); Path(raw_dir).mkdir(parents=True, exist_ok=True)
                         if hasattr(cam, 'set_save_dir'):
