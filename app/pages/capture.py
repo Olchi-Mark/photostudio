@@ -490,27 +490,7 @@ class CapturePage(BasePage):
             pass
         self._clear_captures()
 
-        try:
-            raw_dir = Path(r"C:\\PhotoBox\\raw")
-            raw_dir.mkdir(parents=True, exist_ok=True)
-            # Unified: CameraControl 인스턴스만 사용한다.
-            # Unified 경로: CameraControl 인스턴스를 우선 사용한다.
-            cam = getattr(self, '_cam', None)
-            ok_set = False
-            if cam and hasattr(cam, 'set_save_dir'):
-                try:
-                    ok_set = bool(cam.set_save_dir(str(raw_dir)))
-                except Exception:
-                    ok_set = False
-                try:
-                    _log.info("[SDK] set_save_dir rc=%s path=%s", ok_set, str(raw_dir))
-                except Exception:
-                    pass
-            # 폴백 경로 제거: 핸들 없이 저장 설정 호출은 수행하지 않는다.
-            if ok_set:
-                self._save_dir_set = True
-        except Exception:
-            pass
+        # 저장 경로 설정은 연결 직후(통합 경로)에서 한 번만 수행한다.
         self._lock_ui_for_capture(True)
         # 자동 시퀀스 시작: 캡처 진행 오버레이 표시 및 프리뷰/오버레이 최상위로 정렬
         
