@@ -576,12 +576,6 @@ class CapturePage(BasePage):
         self._seq_running = False; self._seq_index = -1; self._ready_since = None
         if self._seq_timer.isActive(): self._seq_timer.stop()
 
-    def _cmd_shoot_one(self):
-        try:
-            self._on_capture_clicked()
-        except Exception:
-            pass
-
     def _lock_ui_for_capture(self, on: bool):
         self._capturing = bool(on)
         self.set_prev_mode("disabled"); self.set_prev_enabled(False)
@@ -1700,16 +1694,7 @@ class CapturePage(BasePage):
         if not self._count_timer.isActive():
             self._count_timer.start()
 
-    def _try_af_async(self):
-        def _run():
-            try:
-                cam = getattr(self.lv, 'cam', None) or getattr(self, '_cam', None) or self.lv
-                if hasattr(cam, 'one_shot_af'):
-                    try: cam.one_shot_af()
-                    except Exception: pass
-            except Exception:
-                pass
-        threading.Thread(target=_run, daemon=True).start()
+    
 
     def _prep_af_awb(self, callback=None):
         def _work():
