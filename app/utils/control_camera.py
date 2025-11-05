@@ -370,7 +370,8 @@ class CameraControl:
             finally:
 
                 try:
-                    h2 = getattr(self._b, "_h", None)
+                    # 라이브뷰 비활성화를 확실히 하기 위해 올바른 핸들 속성('h')을 사용한다.
+                    h2 = getattr(self._b, "h", None)
                     if h2 and getattr(h2, "value", None):
                         try:
                             enable_liveview(h2, False)
