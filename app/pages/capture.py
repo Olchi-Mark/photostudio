@@ -588,6 +588,10 @@ class CapturePage(BasePage):
         except Exception:
             pass
         if self._count_left > 0: return
+        try:
+            _log.info("[SEQ] countdown done -> shoot i=0")
+        except Exception:
+            pass
         self._count_timer.stop(); self._countdown_active = False; self._invoke_shoot(i=0)
 
     def _tick_seq_countdown(self):
@@ -614,6 +618,10 @@ class CapturePage(BasePage):
         if self._seq_count_left <= 0:
             next_i = self._seq_index + 1
             self._seq_timer.stop()
+            try:
+                _log.info("[SEQ] next shot -> shoot i=%s", next_i)
+            except Exception:
+                pass
             self._invoke_shoot(i=next_i)
 
     def _invoke_shoot(self, i: Optional[int]=None):
@@ -623,6 +631,10 @@ class CapturePage(BasePage):
                 # Unified: CameraControl을 사용하여 촬영한다.
                 cam = getattr(self, '_cam', None)
                 t_mark = time.time()
+                try:
+                    _log.info("[SHOT] worker start i=%s t=%.3f", (i if i is not None else "?"), t_mark)
+                except Exception:
+                    pass
                 # Dry-run 토글: CAP_DRY_SHOT=1이면 네이티브 촬영 호출을 건너뛰고 UI/캡처만 수행한다.
                 try:
                     dry = str(os.getenv("CAP_DRY_SHOT", "0")).strip().lower() in ("1","true","on")

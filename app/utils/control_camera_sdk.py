@@ -4,6 +4,7 @@ import os, ctypes as C, logging
 from ctypes import wintypes as W
 from ctypes import create_unicode_buffer
 from typing import Optional
+from .crsdk_pybridge import error_name as _errname
 
 # DLL load
 _DLL_PATH = os.environ.get("CRSDK_DLL", "crsdk_pybridge.dll")
@@ -252,7 +253,11 @@ class SDKCamera:
             rc_dl = _safe_set_download_dir(path)
         except Exception:
             rc_dl = -1
-        _log.info("[SDK] set_save_dir rc_info=%s rc_dl=%s path=%s", rc_info, rc_dl, path)
+        try:
+            name = _errname(int(rc_info)) if rc_info not in (0, None) else "OK"
+        except Exception:
+            name = "?"
+        _log.info("[SDK] set_save_dir rc_info=%s(%s) rc_dl=%s path=%s", rc_info, name, rc_dl, path)
         return (rc_info == 0 and rc_dl == 0)
 
     def get_last_saved_path(self) -> Optional[str]:
